@@ -84,23 +84,23 @@
       <recent name="$PROJECT_DIR$" />
     </key>
   </component>
-  <component name="RunManager" selected="Go Test.go test github.com/mudphilo/go-utils">
-    <configuration name="TestLibrary in github.com/mudphilo/go-utils" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+  <component name="RunManager" selected="Go Test.go test github.com/choplife-group/go-utils">
+    <configuration name="TestLibrary in github.com/choplife-group/go-utils" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="utils" />
       <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="github.com/mudphilo/go-utils" />
+      <package value="github.com/choplife-group/go-utils" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
       <pattern value="^\QTestLibrary\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="go test github.com/mudphilo/go-utils" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+    <configuration name="go test github.com/choplife-group/go-utils" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="utils" />
       <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="github.com/mudphilo/go-utils" />
+      <package value="github.com/choplife-group/go-utils" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
@@ -108,8 +108,8 @@
     </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Go Test.go test github.com/mudphilo/go-utils" />
-        <item itemvalue="Go Test.TestLibrary in github.com/mudphilo/go-utils" />
+        <item itemvalue="Go Test.go test github.com/choplife-group/go-utils" />
+        <item itemvalue="Go Test.TestLibrary in github.com/choplife-group/go-utils" />
       </list>
     </recent_temporary>
   </component>

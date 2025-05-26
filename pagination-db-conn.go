@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/mudphilo/go-utils/models"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/choplife-group/go-utils/models"
 )
 
 func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, paginator models.Paginator) models.Pagination {
