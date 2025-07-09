@@ -120,7 +120,8 @@ func GetProfileIDFromContext(c echo.Context) int64 {
 func ExtractResourceInfo(c echo.Context, resourceTypeMap map[string]string) (string, int64) {
 	path := c.Path()
 	
-	basePath := strings.Split(path, "/:")[0]
+	pathParts := strings.Split(path, "/:")
+	basePath := pathParts[0]
 	
 	resourceType := resourceTypeMap[basePath]
 	if resourceType == "" {
@@ -134,7 +135,9 @@ func ExtractResourceInfo(c echo.Context, resourceTypeMap map[string]string) (str
 	if idParam := c.Param("id"); idParam != "" {
 		if parsed, err := strconv.ParseInt(idParam, 10, 64); err == nil {
 			resourceID = parsed
-		}
+		}else {
+			fmt.Printf("Failed to parse resource ID '%s': %v\n", idParam, err.Error())
+ 		}
 	}
 	
 	return resourceType, resourceID
