@@ -33,23 +33,27 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 			err := next(c)
 	
 			if c.Response().Status < 300 {
-				go func() {
-					profileID := GetProfileIDFromContext(c)
-	
-					resourceType, resourceID := ExtractResourceInfo(c, config.ResourceTypeMap)
-	
-					
-					logData := LogQueueData{
-						ProfileID:    profileID,
-						Description:  GenerateDescription(c.Request().Method, c.Path()),
-						Method:       GetMethodCode(c.Request().Method),
-						ResourceID:   resourceID,
-						ResourceType: resourceType,
-						IPAddress:    c.RealIP(),
-					}
+				method := strings.ToUpper(c.Request().Method)
 
-					_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
-				}()
+				if method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE" {
+					go func() {
+						profileID := GetProfileIDFromContext(c)
+		
+						resourceType, resourceID := ExtractResourceInfo(c, config.ResourceTypeMap)
+		
+						
+						logData := LogQueueData{
+							ProfileID:    profileID,
+							Description:  GenerateDescription(c.Request().Method, c.Path()),
+							Method:       GetMethodCode(c.Request().Method),
+							ResourceID:   resourceID,
+							ResourceType: resourceType,
+							IPAddress:    c.RealIP(),
+						}
+	
+						_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
+					}()
+				}
 			}
 			
 			return err
@@ -59,8 +63,6 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 
 func GetMethodCode(method string) int16 {
 	switch strings.ToUpper(method) {
-	case "GET":
-		return METHOD_GET
 	case "POST":
 		return METHOD_POST
 	case "PUT":
@@ -70,15 +72,13 @@ func GetMethodCode(method string) int16 {
 	case "PATCH":
 		return METHOD_PATCH
 	default:
-		return METHOD_GET
+		return 1
 	}
 }
 
 func GenerateDescription(method, path string) string {
 	action := ""
 	switch strings.ToUpper(method) {
-	case "GET":
-		action = ACTION_GET
 	case "POST":
 		action = ACTION_POST
 	case "PUT":
@@ -88,7 +88,7 @@ func GenerateDescription(method, path string) string {
 	case "PATCH":
 		action = ACTION_PATCH
 	default:
-		action = ACTION_GET
+		action = ACTION_UNKNOWN
 	}
 	
 	resource := strings.ReplaceAll(strings.Trim(path, "/"), "/", " ")
