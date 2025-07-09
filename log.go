@@ -22,9 +22,9 @@ type LogQueueData struct {
 	ProfileID    int64  `json:"profile_id"`
 	Description  string `json:"description"`
 	Method       int16  `json:"method" enums:"1,2,3,4,5"`
-	ResourceId   int64  `json:"resource_id"`
+	ResourceID   int64  `json:"resource_id"`
 	ResourceType string `json:"resource_type"`
-	IpAddress    string `json:"ip_address"`
+	IPAddress    string `json:"ip_address"`
 }
 
 func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
@@ -43,9 +43,9 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 						ProfileID:    profileID,
 						Description:  GenerateDescription(c.Request().Method, c.Path()),
 						Method:       GetMethodCode(c.Request().Method),
-						ResourceId:   resourceID,
+						ResourceID:   resourceID,
 						ResourceType: resourceType,
-						IpAddress:    c.RealIP(),
+						IPAddress:    c.RealIP(),
 					}
 
 					_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
