@@ -32,7 +32,7 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			err := next(c)
 	
-			if c.Response().Status < 300 {
+			if c.Response().Status == 200 || c.Response().Status == 201 {
 				method := strings.ToUpper(c.Request().Method)
 
 				allowedMethods := map[string]struct{}{
