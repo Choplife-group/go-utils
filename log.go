@@ -35,25 +35,34 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 			if c.Response().Status < 300 {
 				method := strings.ToUpper(c.Request().Method)
 
-				if method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE" {
-					go func() {
-						profileID := GetProfileIDFromContext(c)
-		
-						resourceType, resourceID := ExtractResourceInfo(c, config.ResourceTypeMap)
-		
-						
-						logData := LogQueueData{
-							ProfileID:    profileID,
-							Description:  GenerateDescription(c.Request().Method, c.Path()),
-							Method:       GetMethodCode(c.Request().Method),
-							ResourceID:   resourceID,
-							ResourceType: resourceType,
-							IPAddress:    c.RealIP(),
-						}
-	
-						_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
-					}()
+				allowedMethods := map[string]struct{}{
+					"POST": {},
+					"PUT": {},
+					"PATCH": {},
+					"DELETE": {},
 				}
+
+				if _, isMethod := allowedMethods[method]; !isMethod {
+					return nil
+				}
+
+				go func() {
+					profileID := GetProfileIDFromContext(c)
+	
+					resourceType, resourceID := ExtractResourceInfo(c, config.ResourceTypeMap)
+	
+					
+					logData := LogQueueData{
+						ProfileID:    profileID,
+						Description:  GenerateDescription(c.Request().Method, c.Path()),
+						Method:       GetMethodCode(c.Request().Method),
+						ResourceID:   resourceID,
+						ResourceType: resourceType,
+						IPAddress:    c.RealIP(),
+					}
+
+					_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
+				}()
 			}
 			
 			return err
