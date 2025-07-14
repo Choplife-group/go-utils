@@ -28,6 +28,16 @@ type LogQueueData struct {
 }
 
 func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
+	allowedMethods := [...]string{"POST", "PUT", "PATCH", "DELETE"}
+	isMethodAllowed := func(method string) bool {
+		for _, m := range allowedMethods {
+			if m == method {
+				return true
+			}
+		}
+		return false
+	}
+
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			err := next(c)
@@ -35,14 +45,7 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 			if c.Response().Status == 200 || c.Response().Status == 201 {
 				method := strings.ToUpper(c.Request().Method)
 
-				allowedMethods := map[string]struct{}{
-					"POST": {},
-					"PUT": {},
-					"PATCH": {},
-					"DELETE": {},
-				}
-
-				if _, isMethod := allowedMethods[method]; !isMethod {
+				if !isMethodAllowed(method){
 					return nil
 				}
 
