@@ -23,8 +23,8 @@ type LogQueueData struct {
 	Description  string `json:"description"`
 	Method       int16  `json:"method" enums:"1,2,3,4,5"`
 	ResourceID   int64  `json:"resource_id"`
-	ResourceType string `json:"resource_type"`
 	IPAddress    string `json:"ip_address"`
+	Route        string `json:"route"`
 }
 
 func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
@@ -41,33 +41,32 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			err := next(c)
-	
+
 			if c.Response().Status == 200 || c.Response().Status == 201 {
 				method := strings.ToUpper(c.Request().Method)
 
-				if !isMethodAllowed(method){
+				if !isMethodAllowed(method) {
 					return nil
 				}
 
 				go func() {
 					profileID := GetProfileIDFromContext(c)
-	
-					resourceType, resourceID := ExtractResourceInfo(c, config.ResourceTypeMap)
-	
-					
+
+					resourceID := ExtractResourceID(c, config.ResourceTypeMap)
+
 					logData := LogQueueData{
 						ProfileID:    profileID,
 						Description:  GenerateDescription(c.Request().Method, c.Path()),
 						Method:       GetMethodCode(c.Request().Method),
 						ResourceID:   resourceID,
-						ResourceType: resourceType,
 						IPAddress:    c.RealIP(),
+						Route:        c.Path(),
 					}
 
 					_ = config.Publisher.Publish(context.Background(), "logging-service.log", logData, 0)
 				}()
 			}
-			
+
 			return err
 		}
 	}
@@ -102,7 +101,7 @@ func GenerateDescription(method, path string) string {
 	default:
 		action = ACTION_UNKNOWN
 	}
-	
+
 	resource := strings.ReplaceAll(strings.Trim(path, "/"), "/", " ")
 	resource = strings.ReplaceAll(resource, "-", " ")
 
@@ -116,7 +115,7 @@ func GenerateDescription(method, path string) string {
 		}
 		resource = strings.Join(cleanParts, " ")
 	}
-	
+
 	return fmt.Sprintf("User %s %s", action, resource)
 }
 
@@ -129,28 +128,13 @@ func GetProfileIDFromContext(c echo.Context) int64 {
 	return profileID
 }
 
-func ExtractResourceInfo(c echo.Context, resourceTypeMap map[string]string) (string, int64) {
-	path := c.Path()
-	
-	pathParts := strings.Split(path, "/:")
-	basePath := pathParts[0]
-	
-	resourceType := resourceTypeMap[basePath]
-	if resourceType == "" {
-		pathParts := strings.Split(strings.Trim(path, "/"), "/")
-		if len(pathParts) > 0 {
-			resourceType = strings.ReplaceAll(pathParts[0], "-", "_")
-		}
-	}
-	
-	var resourceID int64
+func ExtractResourceID(c echo.Context, resourceTypeMap map[string]string) int64 {
 	if idParam := c.Param("id"); idParam != "" {
 		if parsed, err := strconv.ParseInt(idParam, 10, 64); err == nil {
-			resourceID = parsed
-		}else {
+			return parsed
+		} else {
 			fmt.Printf("Failed to parse resource ID '%s': %v\n", idParam, err.Error())
- 		}
+		}
 	}
-	
-	return resourceType, resourceID
+	return 0
 }
