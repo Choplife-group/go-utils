@@ -10,7 +10,6 @@ import (
 )
 
 type LogConfig struct {
-	ResourceTypeMap map[string]string
 	Publisher       Publisher
 }
 
@@ -52,7 +51,7 @@ func LoggingMiddleware(config LogConfig) echo.MiddlewareFunc {
 				go func() {
 					profileID := GetProfileIDFromContext(c)
 
-					resourceID := ExtractResourceID(c, config.ResourceTypeMap)
+					resourceID := ExtractResourceID(c)
 
 					logData := LogQueueData{
 						ProfileID:    profileID,
@@ -128,7 +127,7 @@ func GetProfileIDFromContext(c echo.Context) int64 {
 	return profileID
 }
 
-func ExtractResourceID(c echo.Context, resourceTypeMap map[string]string) int64 {
+func ExtractResourceID(c echo.Context) int64 {
 	if idParam := c.Param("id"); idParam != "" {
 		if parsed, err := strconv.ParseInt(idParam, 10, 64); err == nil {
 			return parsed
