@@ -292,6 +292,10 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 	}
 
 	// regular domain
+	if err := m.hostPolicy()(ctx, name); err != nil {
+		return nil, err
+	}
+
 	ck := certKey{
 		domain: strings.TrimSuffix(name, "."), // golang.org/issue/18114
 		isRSA:  !supportsECDSA(hello),
@@ -305,9 +309,6 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 	}
 
 	// first-time
-	if err := m.hostPolicy()(ctx, name); err != nil {
-		return nil, err
-	}
 	cert, err = m.createCert(ctx, ck)
 	if err != nil {
 		return nil, err
@@ -463,7 +464,7 @@ func (m *Manager) cert(ctx context.Context, ck certKey) (*tls.Certificate, error
 		leaf: cert.Leaf,
 	}
 	m.state[ck] = s
-	go m.startRenew(ck, s.key, s.leaf.NotAfter)
+	m.startRenew(ck, s.key, s.leaf.NotAfter)
 	return cert, nil
 }
 
@@ -609,7 +610,7 @@ func (m *Manager) createCert(ctx context.Context, ck certKey) (*tls.Certificate,
 	}
 	state.cert = der
 	state.leaf = leaf
-	go m.startRenew(ck, state.key, state.leaf.NotAfter)
+	m.startRenew(ck, state.key, state.leaf.NotAfter)
 	return state.tlscert()
 }
 
