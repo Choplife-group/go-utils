@@ -370,6 +370,100 @@ func HTTPFormPostWithContext(ctx context.Context, endpoint string, headers map[s
 	return st, string(body)
 }
 
+func HTTPPutWithContext(ctx context.Context, endpoint string, headers map[string]string, payload interface{}) (httpStatus int, response string) {
+
+	if payload == nil {
+		payload = "{}"
+	}
+
+	jsonData, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("got error making http request %s", err.Error())
+		return 0, ""
+	}
+
+	logHeaders := make(map[string]string)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	logHeaders["Content-Type"] = "application/json"
+	logHeaders["Accept"] = "application/json"
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+		logHeaders[k] = v
+	}
+
+	resp, err := NewNetClient().Do(req)
+	if err != nil {
+		log.Printf("got error making http request %s", err.Error())
+
+		return 0, ""
+	}
+	defer resp.Body.Close()
+
+	st := resp.StatusCode
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("got error reading http response %s", err.Error())
+		return st, ""
+	}
+
+	logRequest("PUT", endpoint, logHeaders, payload, st, req.Header, string(body))
+
+	return st, string(body)
+}
+
+func HTTPPatchWithContext(ctx context.Context, endpoint string, headers map[string]string, payload interface{}) (httpStatus int, response string) {
+
+	if payload == nil {
+		payload = "{}"
+	}
+
+	jsonData, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("got error making http request %s", err.Error())
+		return 0, ""
+	}
+
+	logHeaders := make(map[string]string)
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	logHeaders["Content-Type"] = "application/json"
+	logHeaders["Accept"] = "application/json"
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+		logHeaders[k] = v
+	}
+
+	resp, err := NewNetClient().Do(req)
+	if err != nil {
+		log.Printf("got error making http request %s", err.Error())
+
+		return 0, ""
+	}
+	defer resp.Body.Close()
+
+	st := resp.StatusCode
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("got error reading http response %s", err.Error())
+		return st, ""
+	}
+
+	logRequest("PATCH", endpoint, logHeaders, payload, st, req.Header, string(body))
+
+	return st, string(body)
+}
+
 func logRequest(method, endpoint string, requestHeaders map[string]string, requestBody interface{}, responseStatus int, responseHeader http.Header, responseBody string) {
 
 	if os.Getenv("debug") == "1" || os.Getenv("DEBUG") == "1" {
