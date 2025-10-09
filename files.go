@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -88,12 +89,22 @@ func RandomFileName(length int) (string, error) {
 func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string) (string, error) {
 	remoteBucket := os.Getenv("GCLOUD_BUCKET")
 
+	if remoteBucket == "" {
+		return "", errors.New("GCLOUD_BUCKET is not set")
+	}
+
 	credentialsPath := os.Getenv("GCLOUD_STORAGE_CREDENTIALS_PATH")
+
+	if credentialsPath == "" {
+		return "", errors.New("GCLOUD_STORAGE_CREDENTIALS_PATH is not set")
+	}
 
 	client, err := storage.NewClient(ctx, option.WithCredentialsFile(credentialsPath))
 	if err != nil {
 		return "", err
 	}
+
+	defer client.Close()
 
 	bh := client.Bucket(remoteBucket)
 	// Next check if the bucket exists
@@ -106,7 +117,7 @@ func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string)
 	w := obj.NewWriter(ctx)
 	_, err = w.Write(data)
 	if err != nil {
-		
+		w.Close()
 
 		return "", err
 	}
