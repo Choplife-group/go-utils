@@ -2,10 +2,9 @@ package library
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jinzhu/now"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"log"
 	"math"
 	"net"
@@ -16,6 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jinzhu/now"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const notSetError = "is not set"
@@ -1164,4 +1166,55 @@ func getDayOfWeekNumber(dayOfWeek string) int {
 
 	return 0
 
+}
+
+func HasNonEmptyFields(payload interface{}) bool {
+
+	if payload == nil {
+		return false
+	}
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+
+	var m map[string]interface{}
+	err = json.Unmarshal(jsonData, &m)
+	if err != nil {
+		return false
+	}
+
+	var checkMap func(map[string]interface{}) bool
+	checkMap = func(data map[string]interface{}) bool {
+		for _, v := range data {
+			switch val := v.(type) {
+
+			case string:
+				if strings.TrimSpace(val) != "" {
+					return true
+				}
+
+			case map[string]interface{}:
+				if checkMap(val) {
+					return true
+				}
+
+			case []interface{}:
+				if len(val) > 0 {
+					return true
+				}
+
+			case nil:
+				continue
+
+			default:
+				// Numbers, booleans, etc. are considered content
+				return true
+			}
+		}
+		return false
+	}
+
+	return checkMap(m)
 }
