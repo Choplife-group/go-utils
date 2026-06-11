@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/choplife-group/go-utils/models"
+	"github.com/HeyTwoHeads/go-utils/models"
 )
 
 func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, paginator models.Paginator) models.Pagination {
