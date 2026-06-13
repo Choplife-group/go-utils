@@ -3,14 +3,13 @@ package library
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/Pallinder/go-randomdata"
+	"golang.org/x/crypto/bcrypt"
 	"log"
 	"math/big"
 	"os"
 	"regexp"
 	"strings"
-
-	"github.com/Pallinder/go-randomdata"
-	"golang.org/x/crypto/bcrypt"
 )
 
 const (
@@ -27,9 +26,9 @@ const (
 	prefixError = "%s\n%s"
 )
 
+
 // randomInsert randomly inserts the given value into the given string.
 func RandomInsert(s, val string) (string, error) {
-
 	if s == "" {
 		return val, nil
 	}
@@ -38,9 +37,7 @@ func RandomInsert(s, val string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	i := n.Int64()
-
 	return s[0:i] + val + s[i:], nil
 }
 
@@ -52,7 +49,6 @@ func RandomElement(s string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	return string(s[n.Int64()]), nil
 }
 
@@ -149,14 +145,12 @@ func RandomPassword() string {
 
 		return "abc@123@kes"
 	}
-
 	char := randomdata.Country(randomdata.ThreeCharCountry)
 	cur := randomdata.Currency()
-	specialCharacters := []string{"*", "@", "-", "?", "#", "$", "%"}
+	specialCharacters := []string{"*","@","-","?","#","$","%"}
 	num := randomdata.Number(1000, 9999)
-	password := fmt.Sprintf("%s%s%d%s%s", char, specialCharacters[randomdata.Number(0, len(specialCharacters))], num, specialCharacters[randomdata.Number(0, len(specialCharacters))], cur)
+	password := fmt.Sprintf("%s%s%d%s%s", char,specialCharacters[randomdata.Number(0,len(specialCharacters))], num,specialCharacters[randomdata.Number(0,len(specialCharacters))],cur)
 	password = removeSpaces(password)
-
 	return password
 }
 
@@ -164,7 +158,6 @@ func removeSpaces(text string) string {
 
 	space := regexp.MustCompile(`\s+`)
 	text = strings.Replace(text, " ", "", -1)
-
 	return space.ReplaceAllString(text, " ")
 }
 
@@ -180,7 +173,6 @@ func PasswordMatch(hash []byte, password []byte) bool {
 			return true
 		}
 	}
-
 	// Use GenerateFromPassword to hash & salt pwd.
 	// MinCost is just an integer constant provided by the bcrypt
 	// package along with DefaultCost & MaxCost.
@@ -210,7 +202,7 @@ func Hash(password string) (string, error) {
 
 	if err != nil {
 
-		log.Printf("error hashing password %s ", err.Error())
+		log.Printf("got error hasing password %s ", err.Error())
 		return "", err
 	}
 
@@ -218,3 +210,4 @@ func Hash(password string) (string, error) {
 	// convert the bytes to a string and return it
 	return string(hash), nil
 }
+

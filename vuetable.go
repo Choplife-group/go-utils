@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/HeyTwoHeads/go-utils/models"
+	"github.com/choplife-group/go-utils/models"
 )
 
 // Deprecated: please use PaginateDataWithContext

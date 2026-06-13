@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/HeyTwoHeads/go-utils/models"
+	"github.com/choplife-group/go-utils/models"
 )
 
 func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, paginator models.Paginator) models.Pagination {
@@ -38,7 +38,6 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 
 			return strings.Join(orWhere[:], " AND ")
 		}
-
 		return "1"
 	}
 
@@ -64,6 +63,7 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 	}
 
 	// build order by query
+
 	orderBy := ""
 
 	if len(search.Sort) > 0 {
@@ -92,14 +92,21 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 		}
 	}
 
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
+	// count query
+	countQuery := fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s ", primaryKey, tableName, joinQuery, whereQuery())
 
 	total := 0
 
 	dbUtil := Db{DBConn: db, Context: ctx}
-
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
+
+	if isDebug != 0 {
+
+		log.Printf("Count Query | %s", countQuery)
+		log.Printf("Params | %v", params...)
+
+	}
 
 	if isDebug != 0 {
 
@@ -151,6 +158,9 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 
 	var resp models.Pagination
 
+	// pull records
+
+	// retrieve user roles
 	dbUtil.SetQuery(sqlQuery)
 
 	rows, err := dbUtil.FetchWithContext()
@@ -165,8 +175,8 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 		resp.From = from
 		resp.To = 0
 		resp.Data = make(map[string]interface{})
-
 		return resp
+
 	}
 
 	defer rows.Close()
@@ -212,7 +222,6 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 
 			return strings.Join(orWhere[:], " AND ")
 		}
-
 		return "1"
 	}
 
@@ -238,6 +247,7 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 	}
 
 	// build order by query
+
 	orderBy := ""
 
 	if len(search.Sort) > 0 {
@@ -268,6 +278,7 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 
 	hardLimit, _ := strconv.ParseInt(os.Getenv("HARD_SQL_FETCH_LIMIT"), 10, 64)
 	if hardLimit == 0 {
+
 		hardLimit = 200000
 	}
 
@@ -275,28 +286,26 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
+		countQuery = fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s ", primaryKey, tableName, joinQuery, whereQuery())
 
 	} else {
 
-		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
+		countQuery = fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s LIMIT %d", primaryKey, tableName, joinQuery, whereQuery(), hardLimit)
 
 	}
+	// count query
 
 	total := 0
 
 	dbUtil := Db{DBConn: db, Context: ctx}
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
-
 	if isDebug != 0 {
 
 		log.Printf("Count Query | %s", countQuery)
 		log.Printf("Params | %v", params...)
 
 	}
-
 	err := dbUtil.FetchOneWithContext().Scan(&total)
 	if err != nil {
 
@@ -316,14 +325,15 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 
 	}
 
-	dbUtil.SetQuery(sqlQuery)
+	// pull records
 
+	// retrieve user roles
+	dbUtil.SetQuery(sqlQuery)
 	if isDebug != 0 {
 
 		log.Printf("Data Query | %s", sqlQuery)
 
 	}
-
 	rows, err := dbUtil.FetchWithContext()
 	if err != nil {
 
@@ -335,7 +345,6 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 	defer rows.Close()
 
 	rowData = paginator.Results(rows)
-
 	return rowData, headers
 }
 
@@ -365,7 +374,6 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 
 			return strings.Join(orWhere[:], " AND ")
 		}
-
 		return "1"
 	}
 
@@ -391,6 +399,7 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 	}
 
 	// build order by query
+
 	orderBy := ""
 
 	if len(search.Sort) > 0 {
@@ -419,13 +428,21 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 		}
 	}
 
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
+	// count query
+	countQuery := fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s ", primaryKey, tableName, joinQuery, whereQuery())
 
 	total := 0
 
 	dbUtil := Db{DBConnSlave: dbSlave, Context: ctx}
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
+
+	if isDebug != 0 {
+
+		log.Printf("Count Query | %s", countQuery)
+		log.Printf("Params | %v", params...)
+
+	}
 
 	if isDebug != 0 {
 
@@ -477,6 +494,9 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 
 	var resp models.Pagination
 
+	// pull records
+
+	// retrieve user roles
 	dbUtil.SetQuery(sqlQuery)
 
 	rows, err := dbUtil.FetchSlaveWithContext()
@@ -491,8 +511,8 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 		resp.From = from
 		resp.To = 0
 		resp.Data = make(map[string]interface{})
-
 		return resp
+
 	}
 
 	defer rows.Close()
@@ -505,7 +525,6 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 	resp.From = from
 	resp.To = offset + len(data)
 	resp.Data = data
-
 	return resp
 }
 
@@ -539,7 +558,6 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 
 			return strings.Join(orWhere[:], " AND ")
 		}
-
 		return "1"
 	}
 
@@ -565,6 +583,7 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 	}
 
 	// build order by query
+
 	orderBy := ""
 
 	if len(search.Sort) > 0 {
@@ -595,6 +614,7 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 
 	hardLimit, _ := strconv.ParseInt(os.Getenv("HARD_SQL_FETCH_LIMIT"), 10, 64)
 	if hardLimit == 0 {
+
 		hardLimit = 200000
 	}
 
@@ -602,28 +622,26 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
+		countQuery = fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s ", primaryKey, tableName, joinQuery, whereQuery())
 
 	} else {
 
-		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
+		countQuery = fmt.Sprintf("SELECT count(%s) as total FROM %s %s WHERE %s LIMIT %d", primaryKey, tableName, joinQuery, whereQuery(), hardLimit)
 
 	}
+	// count query
 
 	total := 0
 
 	dbUtil := Db{DBConnSlave: dbSlave, Context: ctx}
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
-
 	if isDebug != 0 {
 
 		log.Printf("Count Query | %s", countQuery)
 		log.Printf("Params | %v", params...)
 
 	}
-
 	err := dbUtil.FetchOneSlaveWithContext().Scan(&total)
 	if err != nil {
 
@@ -643,14 +661,15 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 
 	}
 
-	dbUtil.SetQuery(sqlQuery)
+	// pull records
 
+	// retrieve user roles
+	dbUtil.SetQuery(sqlQuery)
 	if isDebug != 0 {
 
 		log.Printf("Data Query | %s", sqlQuery)
 
 	}
-
 	rows, err := dbUtil.FetchSlaveWithContext()
 	if err != nil {
 
@@ -662,6 +681,5 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 	defer rows.Close()
 
 	rowData = paginator.Results(rows)
-
 	return rowData, headers
 }

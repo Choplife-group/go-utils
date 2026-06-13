@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sort"
 	"strings"
 )
 
+// Db router and DB instance
 type Db struct {
 	DBConn      *sql.Conn
 	DB          *sql.DB
@@ -22,21 +22,15 @@ type Db struct {
 	Context     context.Context
 }
 
-const DbError = "Error preparing a.Query %s a.Params %v error %s "
-
-func (a *Db) dialect() string {
-
-	if a.Dialect == "" {
-		return "mysql"
-	}
-
-	return a.Dialect
-}
+const DbError = "Got error  preparing a.Query %s a.Params %v error %s "
 
 func (a *Db) StartTransaction() error {
 
-	// FIX: postgres supports transactions; removed the early-return error for postgres.
-	// The standard sql.DB transaction API works the same for both dialects.
+	if a.Dialect == "postgres" {
+
+		return fmt.Errorf("transactions are not implemented for %s", a.Dialect)
+
+	}
 
 	if a.DBConn != nil {
 
@@ -62,21 +56,27 @@ func (a *Db) StartTransaction() error {
 	a.TX = tx
 
 	return nil
+
 }
 
 func (a *Db) Rollback() error {
 
 	if a.TX == nil {
-		return fmt.Errorf("transaction was not started")
+
+		return fmt.Errorf("Transaction was not started ")
+
 	}
 
 	return a.TX.Rollback()
+
 }
 
 func (a *Db) Commit() error {
 
 	if a.TX == nil {
-		return fmt.Errorf("transaction was not started")
+
+		return fmt.Errorf("Transaction was not started ")
+
 	}
 
 	return a.TX.Commit()
@@ -84,26 +84,19 @@ func (a *Db) Commit() error {
 
 func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 
-	if a.dialect() == "postgres" {
+	if a.Dialect == "postgres" {
 
 		var lastInsertId sql.NullInt64
 
-		if a.DBConn != nil {
-
-			err = a.DBConn.QueryRowContext(a.Context, a.Query, a.Params...).Scan(&lastInsertId)
-
-		} else {
-
-			err = a.DB.QueryRowContext(a.Context, a.Query, a.Params...).Scan(&lastInsertId)
-
-		}
-
+		err = a.DB.QueryRowContext(a.Context, a.Query, a.Params...).Scan(&lastInsertId)
 		if err != nil {
+
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return 0, err
 		}
 
 		return lastInsertId.Int64, nil
+
 	}
 
 	var stmt *sql.Stmt
@@ -125,6 +118,7 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return 0, err
 		}
+
 	}
 
 	defer stmt.Close()
@@ -138,7 +132,6 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 
 	lastInsertId, err := res.LastInsertId()
 	if err != nil {
-
 		log.Printf(DbError, a.Query, a.Params, err.Error())
 		return 0, err
 	}
@@ -150,34 +143,33 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 func (a *Db) InsertQuery() (lastInsertID int64, err error) {
 
 	a.Context = context.TODO()
-
 	return a.InsertQueryWithContext()
+
 }
 
 func (a *Db) InsertQueryWithContextTx() (lastInsertID int64, err error) {
 
-	if a.TX == nil {
+	if a.Dialect == "postgres" {
 
-		err = a.StartTransaction()
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	if a.dialect() == "postgres" {
-
-		// FIX: use TX for postgres too — previously bypassed the transaction by
-		// calling a.DB.QueryRowContext directly, meaning postgres inserts inside a
-		// Tx caller would execute outside the transaction entirely.
 		var lastInsertId sql.NullInt64
 
-		err = a.TX.QueryRowContext(a.Context, a.Query, a.Params...).Scan(&lastInsertId)
+		err = a.DB.QueryRowContext(a.Context, a.Query, a.Params...).Scan(&lastInsertId)
 		if err != nil {
+
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return 0, err
 		}
 
 		return lastInsertId.Int64, nil
+
+	}
+
+	if a.TX == nil {
+
+		if err = a.StartTransaction(); err != nil {
+
+			return 0, err
+		}
 	}
 
 	stmt, err := a.TX.PrepareContext(a.Context, a.Query)
@@ -227,6 +219,7 @@ func (a *Db) UpdateQueryWithContext() (rowsAffected int64, err error) {
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return 0, err
 		}
+
 	}
 
 	defer stmt.Close()
@@ -251,16 +244,16 @@ func (a *Db) UpdateQueryWithContext() (rowsAffected int64, err error) {
 func (a *Db) UpdateQuery() (rowsAffected int64, err error) {
 
 	a.Context = context.TODO()
-
 	return a.UpdateQueryWithContext()
+
 }
 
 func (a *Db) UpdateQueryWithContextTx() (rowsAffected int64, err error) {
 
 	if a.TX == nil {
 
-		err = a.StartTransaction()
-		if err != nil {
+		if err = a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
 	}
@@ -321,12 +314,7 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	stmt, err := a.TX.PrepareContext(a.Context, a.Query)
 	if err != nil {
 
-		if wasNil {
-			_ = a.TX.Rollback()
-		}
-
 		log.Printf(DbError, a.Query, a.Params, err.Error())
-
 		return nil, err
 	}
 
@@ -336,11 +324,10 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	if err != nil {
 
 		if wasNil {
+
 			_ = a.TX.Rollback()
 		}
-
 		log.Printf(DbError, a.Query, a.Params, err.Error())
-
 		return nil, err
 	}
 
@@ -348,19 +335,16 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	if err != nil {
 
 		if wasNil {
+
 			_ = a.TX.Rollback()
 		}
-
 		log.Printf(DbError, a.Query, a.Params, err.Error())
-
 		return nil, err
 	}
 
 	if wasNil {
-		if commitErr := a.TX.Commit(); commitErr != nil {
-			log.Printf("Got error committing transaction %s ", commitErr.Error())
-			return nil, commitErr
-		}
+
+		_ = a.TX.Rollback()
 	}
 
 	return &lastInsertId, nil
@@ -374,6 +358,10 @@ func (a *Db) InsertInTransaction() (lastInsertID *int64, err error) {
 }
 
 func (a *Db) InsertIgnoreWithContext() (lastInsertID *int64, err error) {
+
+	if a.Dialect == "postgres" {
+
+	}
 
 	var stmt *sql.Stmt
 
@@ -394,6 +382,7 @@ func (a *Db) InsertIgnoreWithContext() (lastInsertID *int64, err error) {
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return nil, err
 		}
+
 	}
 
 	defer stmt.Close()
@@ -426,8 +415,8 @@ func (a *Db) InsertIgnoreWithContextTx() (lastInsertID *int64, err error) {
 
 	if a.TX == nil {
 
-		err = a.StartTransaction()
-		if err != nil {
+		if err = a.StartTransaction(); err != nil {
+
 			return nil, err
 		}
 	}
@@ -518,12 +507,13 @@ func (a *Db) UpdateInTransactionWithContext() (rowsAffected *int64, err error) {
 
 func (a *Db) FetchOneWithContext() *sql.Row {
 
-	if a.dialect() != "postgres" {
+	if a.Dialect != "postgres" {
 
 		if a.DBConn != nil {
 
 			_, err := a.DBConn.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
 
@@ -531,15 +521,16 @@ func (a *Db) FetchOneWithContext() *sql.Row {
 
 			_, err := a.DB.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
-
 		}
+
 	}
 
 	a.removeValidParameters()
 
-	if len(a.Params) == 0 {
+	if a.Params == nil || len(a.Params) == 0 {
 
 		if a.DBConn != nil {
 
@@ -548,10 +539,13 @@ func (a *Db) FetchOneWithContext() *sql.Row {
 		}
 
 		return a.DB.QueryRowContext(a.Context, a.Query)
+
 	}
 
 	if a.DBConn != nil {
+
 		return a.DBConn.QueryRowContext(a.Context, a.Query, a.Params...)
+
 	}
 
 	return a.DB.QueryRowContext(a.Context, a.Query, a.Params...)
@@ -566,37 +560,45 @@ func (a *Db) FetchOne() *sql.Row {
 
 func (a *Db) FetchOneSlaveWithContext() *sql.Row {
 
-	if a.dialect() != "postgres" {
+	if a.Dialect != "postgres" {
 
 		if a.DBConnSlave != nil {
 
 			_, err := a.DBConnSlave.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
 
 		} else {
+
 			_, err := a.DBSlave.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
-
 		}
+
 	}
 
 	a.removeValidParameters()
 
-	if len(a.Params) == 0 {
+	if a.Params == nil || len(a.Params) == 0 {
 
 		if a.DBConnSlave != nil {
+
 			return a.DBConnSlave.QueryRowContext(a.Context, a.Query)
+
 		}
 
 		return a.DBSlave.QueryRowContext(a.Context, a.Query)
+
 	}
 
 	if a.DBConnSlave != nil {
+
 		return a.DBConnSlave.QueryRowContext(a.Context, a.Query, a.Params...)
+
 	}
 
 	return a.DBSlave.QueryRowContext(a.Context, a.Query, a.Params...)
@@ -604,12 +606,13 @@ func (a *Db) FetchOneSlaveWithContext() *sql.Row {
 
 func (a *Db) FetchWithContext() (*sql.Rows, error) {
 
-	if a.dialect() != "postgres" {
+	if a.Dialect != "postgres" {
 
 		if a.DBConn != nil {
 
 			_, err := a.DBConn.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
 
@@ -617,21 +620,23 @@ func (a *Db) FetchWithContext() (*sql.Rows, error) {
 
 			_, err := a.DB.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
-
 		}
+
 	}
 
 	a.removeValidParameters()
 
-	if len(a.Params) == 0 {
+	if a.Params == nil || len(a.Params) == 0 {
 
 		if a.DBConn != nil {
 
 			rows, err := a.DBConn.QueryContext(a.Context, a.Query)
 			if err != nil {
-				log.Printf("error fetching results from database using query %s | no params | error %s", a.Query, err.Error())
+
+				log.Printf("error fetching results from database using query %s | no params |  error %s", a.Query, err.Error())
 			}
 
 			return rows, err
@@ -639,25 +644,30 @@ func (a *Db) FetchWithContext() (*sql.Rows, error) {
 
 		rows, err := a.DB.QueryContext(a.Context, a.Query)
 		if err != nil {
-			log.Printf("error fetching results from database using query %s | no params | error %s", a.Query, err.Error())
+
+			log.Printf("error fetching results from database using query %s | no params |  error %s", a.Query, err.Error())
 		}
 
 		return rows, err
+
 	}
 
 	if a.DBConn != nil {
 
 		rows, err := a.DBConn.QueryContext(a.Context, a.Query, a.Params...)
 		if err != nil {
-			log.Printf("error fetching results from database using query %s | params %v | error %s", a.Query, a.Params, err.Error())
+
+			log.Printf("error fetching results from database using query %s | params %v |  error %s", a.Query, a.Params, err.Error())
 		}
 
 		return rows, err
+
 	}
 
 	rows, err := a.DB.QueryContext(a.Context, a.Query, a.Params...)
 	if err != nil {
-		log.Printf("error fetching results from database using query %s | params %v | error %s", a.Query, a.Params, err.Error())
+
+		log.Printf("error fetching results from database using query %s | params %v |  error %s", a.Query, a.Params, err.Error())
 	}
 
 	return rows, err
@@ -667,24 +677,26 @@ func (a *Db) FetchWithContext() (*sql.Rows, error) {
 func (a *Db) Fetch() (*sql.Rows, error) {
 
 	a.Context = context.TODO()
-
 	return a.FetchWithContext()
 }
 
 func (a *Db) FetchSlaveWithContext() (*sql.Rows, error) {
 
-	if a.dialect() != "postgres" {
+	if a.Dialect != "postgres" {
 
 		if a.DBConnSlave != nil {
 
 			_, err := a.DBConnSlave.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
 
 		} else {
+
 			_, err := a.DBSlave.ExecContext(a.Context, "SET SESSION sql_mode=(SELECT REPLACE(@@sql_mode,'ONLY_FULL_GROUP_BY',''))")
 			if err != nil {
+
 				log.Printf("error disabling ONLY_FULL_GROUP_BY %s", err.Error())
 			}
 		}
@@ -693,75 +705,64 @@ func (a *Db) FetchSlaveWithContext() (*sql.Rows, error) {
 
 	a.removeValidParameters()
 
-	if len(a.Params) == 0 {
+	if a.Params == nil || len(a.Params) == 0 {
 
 		if a.DBConnSlave != nil {
 
 			rows, err := a.DBConnSlave.QueryContext(a.Context, a.Query)
 			if err != nil {
-				log.Printf("error fetching results from database using query %s | no params | error %s", a.Query, err.Error())
+
+				log.Printf("error fetching results from database using query %s | no params |  error %s", a.Query, err.Error())
 			}
 
 			return rows, err
+
 		}
 
 		rows, err := a.DBSlave.QueryContext(a.Context, a.Query)
 		if err != nil {
-			log.Printf("error fetching results from database using query %s | no params | error %s", a.Query, err.Error())
+
+			log.Printf("error fetching results from database using query %s | no params |  error %s", a.Query, err.Error())
 		}
 
 		return rows, err
+
 	}
 
 	if a.DBConnSlave != nil {
+
 		rows, err := a.DBConnSlave.QueryContext(a.Context, a.Query, a.Params...)
 		if err != nil {
-			log.Printf("error fetching results from database using query %s | params %v | error %s", a.Query, a.Params, err.Error())
+
+			log.Printf("error fetching results from database using query %s | params %v |  error %s", a.Query, a.Params, err.Error())
 		}
 
 		return rows, err
+
 	}
 
 	rows, err := a.DBSlave.QueryContext(a.Context, a.Query, a.Params...)
 	if err != nil {
-		log.Printf("error fetching results from database using query %s | params %v | error %s", a.Query, a.Params, err.Error())
+
+		log.Printf("error fetching results from database using query %s | params %v |  error %s", a.Query, a.Params, err.Error())
 	}
 
 	return rows, err
 }
 
 func (a *Db) SetParams(params ...interface{}) {
+
 	a.Params = params
 }
 
 func (a *Db) SetQuery(query string) {
+
 	a.Query = query
 }
 
 func (a *Db) setResults(result ...interface{}) {
+
 	a.Result = result
-}
-
-// sortedKeysAndValues returns map keys in sorted order alongside their
-// corresponding values. This guarantees that column lists and placeholder
-// lists are built in a consistent, deterministic order — critical because
-// Go map iteration order is randomised and mismatches cause silent data
-// corruption or wrong-column writes.
-func sortedKeysAndValues(data map[string]interface{}) (keys []string, values []interface{}) {
-
-	keys = make([]string, 0, len(data))
-	for k := range data {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	values = make([]interface{}, 0, len(data))
-	for _, k := range keys {
-		values = append(values, data[k])
-	}
-
-	return keys, values
 }
 
 func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (int64, error) {
@@ -769,15 +770,16 @@ func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (i
 	var placeHoldersParts, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
 
-	for x, column := range sortedKeys {
-		params = append(params, sortedValues[x])
+	for column, param := range data {
+
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -786,23 +788,10 @@ func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (i
 		}
 	}
 
-	var sqlQueryParts string
-
-	if a.dialect() == "postgres" {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT DO NOTHING",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","))
-
-	} else {
-
-		sqlQueryParts = fmt.Sprintf("INSERT IGNORE INTO %s (%s) VALUES (%s)",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","))
-
-	}
+	sqlQueryParts := fmt.Sprintf("INSERT IGNORE INTO %s (%s) %s (%s) ", tableName, strings.Join(columns, ","), a.getValueKeyword(), strings.Join(placeHoldersParts, ","))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContext()
 }
 
@@ -816,7 +805,9 @@ func (a *Db) Insert(tableName string, data map[string]interface{}) (int64, error
 func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) (int64, error) {
 
 	if a.TX == nil {
+
 		if err := a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
 	}
@@ -824,16 +815,16 @@ func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) 
 	var placeHoldersParts, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
 
-	for x, column := range sortedKeys {
+	for column, param := range data {
 
-		params = append(params, sortedValues[x])
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -842,23 +833,10 @@ func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) 
 		}
 	}
 
-	var sqlQueryParts string
-
-	if a.dialect() == "postgres" {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT DO NOTHING",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","))
-
-	} else {
-
-		sqlQueryParts = fmt.Sprintf("INSERT IGNORE INTO %s (%s) VALUES (%s)",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","))
-
-	}
+	sqlQueryParts := fmt.Sprintf("INSERT IGNORE INTO %s (%s) %s (%s) ", tableName, strings.Join(columns, ","), a.getValueKeyword(), strings.Join(placeHoldersParts, ","))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContextTx()
 }
 
@@ -867,16 +845,16 @@ func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, up
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
 
-	for x, column := range sortedKeys {
+	for column, param := range data {
 
-		params = append(params, sortedValues[x])
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -889,42 +867,18 @@ func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, up
 
 	if updates != nil {
 
-		// FIX: ON DUPLICATE KEY UPDATE is MySQL-only.
-		// Postgres requires ON CONFLICT DO UPDATE SET with excluded.* syntax.
-		// UpsertWithContext has no conflicts parameter so we fall back to DO NOTHING for postgres.
-		// Use UpsertDataWithContext if you need a specific conflict target on postgres.
-		if a.dialect() == "postgres" {
+		for _, f := range updates {
 
-			for _, f := range updates {
-				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
-			}
-
-			updateString = fmt.Sprintf("ON CONFLICT DO UPDATE SET %s", strings.Join(updatesPart, ","))
-		} else {
-
-			for _, f := range updates {
-				updatesPart = append(updatesPart, fmt.Sprintf("%s=VALUES(%s)", f, f))
-			}
-
-			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(updatesPart, ","))
+			updatesPart = append(updatesPart, fmt.Sprintf("%s=VALUES(%s)", f, f))
 		}
+
+		updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s ", strings.Join(updatesPart, ","))
 	}
 
-	var sqlQueryParts string
-	if a.dialect() == "postgres" {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
-
-	} else {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
-	}
+	sqlQueryParts := fmt.Sprintf("INSERT INTO %s (%s) %s (%s) %s", tableName, strings.Join(columns, ","), a.getValueKeyword(), strings.Join(placeHoldersParts, ","), updateString)
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContext()
 }
 
@@ -932,7 +886,6 @@ func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, up
 func (a *Db) Upsert(tableName string, data map[string]interface{}, updates []string) (int64, error) {
 
 	a.Context = context.TODO()
-
 	return a.UpsertWithContext(tableName, data, updates)
 }
 
@@ -941,23 +894,24 @@ func (a *Db) UpsertWithContextTx(tableName string, data map[string]interface{}, 
 	if a.TX == nil {
 
 		if err := a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
-
 	}
 
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
 
-	for x, column := range sortedKeys {
-		params = append(params, sortedValues[x])
+	for column, param := range data {
+
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -970,41 +924,18 @@ func (a *Db) UpsertWithContextTx(tableName string, data map[string]interface{}, 
 
 	if updates != nil {
 
-		if a.dialect() == "postgres" {
+		for _, f := range updates {
 
-			for _, f := range updates {
-				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
-			}
-
-			updateString = fmt.Sprintf("ON CONFLICT DO UPDATE SET %s", strings.Join(updatesPart, ","))
-
-		} else {
-
-			for _, f := range updates {
-				updatesPart = append(updatesPart, fmt.Sprintf("%s=VALUES(%s)", f, f))
-			}
-
-			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(updatesPart, ","))
-
+			updatesPart = append(updatesPart, fmt.Sprintf("%s=VALUES(%s)", f, f))
 		}
+
+		updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s ", strings.Join(updatesPart, ","))
 	}
 
-	var sqlQueryParts string
-	if a.dialect() == "postgres" {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
-
-	} else {
-
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
-
-	}
+	sqlQueryParts := fmt.Sprintf("INSERT INTO %s (%s) %s (%s) %s", tableName, strings.Join(columns, ","), a.getValueKeyword(), strings.Join(placeHoldersParts, ","), updateString)
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContextTx()
 }
 
@@ -1013,45 +944,43 @@ func (a *Db) UpdateWithContext(tableName string, andCondition, data map[string]i
 	var conditions, columns []string
 	var params []interface{}
 
-	sortedDataKeys, sortedDataValues := sortedKeysAndValues(data)
-
 	x := 0
-	for i, column := range sortedDataKeys {
+	for column, param := range data {
 
-		x = i + 1
-		params = append(params, sortedDataValues[i])
-
-		if a.dialect() == "postgres" {
-
-			columns = append(columns, fmt.Sprintf("%s = $%d", column, x))
-
-		} else {
-
-			columns = append(columns, fmt.Sprintf("%s = ?", column))
-
-		}
-	}
-
-	// FIX: use a separate index (j) for sortedCondValues instead of the
-	// error-prone arithmetic (x - len(sortedDataKeys) - 1) that was here before.
-	sortedCondKeys, sortedCondValues := sortedKeysAndValues(andCondition)
-
-	for j, column := range sortedCondKeys {
 		x++
-		params = append(params, sortedCondValues[j])
-		if a.dialect() == "postgres" {
-			conditions = append(conditions, fmt.Sprintf("%s = $%d", column, x))
+		params = append(params, param)
+		if a.Dialect == "postgres" {
+
+			columns = append(columns, fmt.Sprintf("%s = $%d ", column, x))
+
 		} else {
-			conditions = append(conditions, fmt.Sprintf("%s = ?", column))
+
+			columns = append(columns, fmt.Sprintf("%s = ? ", column))
+
 		}
 	}
 
-	sqlQueryParts := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
-		tableName, strings.Join(columns, ", "), strings.Join(conditions, " AND "))
+	for column, value := range andCondition {
+
+		x++
+		if a.Dialect == "postgres" {
+
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
+
+		} else {
+
+			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
+
+		}
+
+		params = append(params, value)
+
+	}
+
+	sqlQueryParts := fmt.Sprintf("UPDATE  %s SET %s WHERE %s ", tableName, strings.Join(columns, ","), strings.Join(conditions, " AND "))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.UpdateQueryWithContext()
 }
 
@@ -1065,7 +994,9 @@ func (a *Db) Update(tableName string, andCondition, data map[string]interface{})
 func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string]interface{}) (int64, error) {
 
 	if a.TX == nil {
+
 		if err := a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
 	}
@@ -1073,50 +1004,43 @@ func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string
 	var conditions, columns []string
 	var params []interface{}
 
-	sortedDataKeys, sortedDataValues := sortedKeysAndValues(data)
-
 	x := 0
-	for i, column := range sortedDataKeys {
+	for column, param := range data {
 
-		x = i + 1
-		params = append(params, sortedDataValues[i])
-
-		if a.dialect() == "postgres" {
-
-			columns = append(columns, fmt.Sprintf("%s = $%d", column, x))
-
-		} else {
-
-			columns = append(columns, fmt.Sprintf("%s = ?", column))
-
-		}
-	}
-
-	// FIX: same condition index fix as UpdateWithContext.
-	sortedCondKeys, sortedCondValues := sortedKeysAndValues(andCondition)
-
-	for j, column := range sortedCondKeys {
 		x++
+		params = append(params, param)
+		if a.Dialect == "postgres" {
 
-		params = append(params, sortedCondValues[j])
-
-		if a.dialect() == "postgres" {
-
-			conditions = append(conditions, fmt.Sprintf("%s = $%d", column, x))
+			columns = append(columns, fmt.Sprintf("%s = $%d ", column, x))
 
 		} else {
 
-			conditions = append(conditions, fmt.Sprintf("%s = ?", column))
+			columns = append(columns, fmt.Sprintf("%s = ? ", column))
 
 		}
 	}
 
-	sqlQueryParts := fmt.Sprintf("UPDATE %s SET %s WHERE %s",
-		tableName, strings.Join(columns, ", "), strings.Join(conditions, " AND "))
+	for column, value := range andCondition {
+
+		x++
+		if a.Dialect == "postgres" {
+
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
+
+		} else {
+
+			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
+
+		}
+
+		params = append(params, value)
+
+	}
+
+	sqlQueryParts := fmt.Sprintf("UPDATE  %s SET %s WHERE %s ", tableName, strings.Join(columns, ","), strings.Join(conditions, " AND "))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.UpdateQueryWithContextTx()
 }
 
@@ -1125,29 +1049,26 @@ func (a *Db) DeleteWithContext(tableName string, andCondition map[string]interfa
 	var conditions []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(andCondition)
+	x := 0
+	for column, value := range andCondition {
 
-	for x, column := range sortedKeys {
+		x++
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			conditions = append(conditions, fmt.Sprintf("%s = $%d", column, x+1))
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
 
 		} else {
 
-			conditions = append(conditions, fmt.Sprintf("%s = ?", column))
+			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
 
 		}
-
-		params = append(params, sortedValues[x])
+		params = append(params, value)
 	}
 
-	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s",
-		tableName, strings.Join(conditions, " AND "))
+	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s ", tableName, strings.Join(conditions, " AND "))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.UpdateQueryWithContext()
 }
 
@@ -1161,7 +1082,9 @@ func (a *Db) Delete(tableName string, andCondition map[string]interface{}) (int6
 func (a *Db) DeleteWithContextTx(tableName string, andCondition map[string]interface{}) (int64, error) {
 
 	if a.TX == nil {
+
 		if err := a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
 	}
@@ -1169,28 +1092,26 @@ func (a *Db) DeleteWithContextTx(tableName string, andCondition map[string]inter
 	var conditions []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(andCondition)
+	x := 0
+	for column, value := range andCondition {
 
-	for x, column := range sortedKeys {
+		x++
+		if a.Dialect == "postgres" {
 
-		if a.dialect() == "postgres" {
-
-			conditions = append(conditions, fmt.Sprintf("%s = $%d", column, x+1))
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
 
 		} else {
 
-			conditions = append(conditions, fmt.Sprintf("%s = ?", column))
+			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
 
 		}
-
-		params = append(params, sortedValues[x])
+		params = append(params, value)
 	}
 
-	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s", tableName, strings.Join(conditions, " AND "))
+	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s ", tableName, strings.Join(conditions, " AND "))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.UpdateQueryWithContextTx()
 }
 
@@ -1199,16 +1120,16 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
+	for column, param := range data {
 
-	for x, column := range sortedKeys {
-
-		params = append(params, sortedValues[x])
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
 
-		if a.dialect() == "postgres" {
+		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -1220,9 +1141,12 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 	updateString := ""
 
 	if updates != nil {
-		for _, f := range updates {
-			if a.dialect() == "postgres" {
 
+		for _, f := range updates {
+
+			if a.Dialect == "postgres" {
+
+				//excluded.
 				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
 
 			} else {
@@ -1232,43 +1156,39 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 			}
 		}
 
-		if a.dialect() == "postgres" {
+		if a.Dialect == "postgres" {
 
-			updateString = fmt.Sprintf("ON CONFLICT (%s) DO UPDATE SET %s",
-				strings.Join(conflicts, ","), strings.Join(updatesPart, ","))
+			updateString = fmt.Sprintf("ON CONFLICT (%s) DO UPDATE SET %s ", strings.Join(conflicts, ","), strings.Join(updatesPart, ","))
 
 		} else {
 
-			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(updatesPart, ","))
+			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s ", strings.Join(updatesPart, ","))
 
 		}
 	}
 
-	var sqlQueryParts string
+	var sqlQueryParts = ""
 
-	if a.dialect() == "postgres" {
+	if a.Dialect == "postgres" {
 
 		if len(primaryKey) > 0 {
 
-			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s RETURNING %s",
-				tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString, primaryKey)
+			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s RETURNING %s", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString, primaryKey)
 
 		} else {
 
-			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-				tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
+			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s ", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
 
 		}
+
 	} else {
 
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
+		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUE (%s) %s", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
 
 	}
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContext()
 }
 
@@ -1282,8 +1202,9 @@ func (a *Db) UpsertData(tableName string, primaryKey string, data map[string]int
 func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data map[string]interface{}, conflicts, updates []string) (int64, error) {
 
 	if a.TX == nil {
-		err := a.StartTransaction()
-		if err != nil {
+
+		if err := a.StartTransaction(); err != nil {
+
 			return 0, err
 		}
 	}
@@ -1291,14 +1212,16 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	sortedKeys, sortedValues := sortedKeysAndValues(data)
+	x := 0
+	for column, param := range data {
 
-	for x, column := range sortedKeys {
-		params = append(params, sortedValues[x])
+		x++
+		params = append(params, param)
 		columns = append(columns, column)
-		if a.dialect() == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
+		if a.Dialect == "postgres" {
+
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
 
 		} else {
 
@@ -1310,9 +1233,12 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 	updateString := ""
 
 	if updates != nil {
-		for _, f := range updates {
-			if a.dialect() == "postgres" {
 
+		for _, f := range updates {
+
+			if a.Dialect == "postgres" {
+
+				//excluded.
 				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
 
 			} else {
@@ -1322,42 +1248,50 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 			}
 		}
 
-		if a.dialect() == "postgres" {
+		if a.Dialect == "postgres" {
 
-			updateString = fmt.Sprintf("ON CONFLICT (%s) DO UPDATE SET %s",
-				strings.Join(conflicts, ","), strings.Join(updatesPart, ","))
+			updateString = fmt.Sprintf("ON CONFLICT (%s) DO UPDATE SET %s ", strings.Join(conflicts, ","), strings.Join(updatesPart, ","))
 
 		} else {
 
-			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s", strings.Join(updatesPart, ","))
+			updateString = fmt.Sprintf("ON DUPLICATE KEY UPDATE %s ", strings.Join(updatesPart, ","))
 
 		}
 	}
 
-	var sqlQueryParts string
-	if a.dialect() == "postgres" {
+	var sqlQueryParts = ""
+
+	if a.Dialect == "postgres" {
+
 		if len(primaryKey) > 0 {
 
-			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s RETURNING %s",
-				tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString, primaryKey)
+			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s RETURNING %s", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString, primaryKey)
 
 		} else {
 
-			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-				tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
+			sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s ", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
 
 		}
+
 	} else {
 
-		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) %s",
-			tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
+		sqlQueryParts = fmt.Sprintf("INSERT INTO %s (%s) VALUE (%s) %s", tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","), updateString)
 
 	}
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
-
 	return a.InsertQueryWithContextTx()
+}
+
+func (a *Db) getValueKeyword() string {
+
+	if a.Dialect == "postgres" {
+
+		return "VALUES"
+	}
+
+	return "VALUES"
 }
 
 func (a *Db) removeValidParameters() {
@@ -1365,10 +1299,13 @@ func (a *Db) removeValidParameters() {
 	var par []interface{}
 
 	for _, p := range a.Params {
+
 		if p != nil {
+
 			par = append(par, p)
 		}
 	}
 
 	a.Params = par
+
 }
