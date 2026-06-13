@@ -12,33 +12,43 @@ import (
 	"github.com/HeyTwoHeads/go-utils/models"
 )
 
-// buildCountQuery returns a COUNT query that correctly handles GROUP BY.
+// buildCountQuery returns a COUNT query that correctly handles GROUP BY and HAVING.
 //
 // Without GROUP BY:
 //
-//	SELECT count(id) FROM table JOIN ... WHERE ...
+//	SELECT count(id) AS total FROM table JOIN ... WHERE ... HAVING ...
 //
-// With GROUP BY, wrapping in a subquery counts the number of groups rather
-// than the number of raw rows, which is what pagination needs:
+// With GROUP BY, wrapping in a subquery counts the number of groups after
+// HAVING filtering, which is what pagination needs:
 //
-//	SELECT count(*) FROM (SELECT primaryKey FROM table JOIN ... WHERE ... GROUP BY ...) AS _count_subquery
-func buildCountQuery(primaryKey, tableName, joinQuery, whereClause, groupByClause string) string {
+//	SELECT count(*) AS total FROM (
+//	    SELECT primaryKey FROM table JOIN ... WHERE ... GROUP BY ... HAVING ...
+//	) AS _count_subquery
+//
+// havingClause must already include the "HAVING" keyword, or be empty string.
+//
+// limitClause optionally caps the inner scan (for download functions).
+// Pass empty string for regular pagination where no cap is needed.
+func buildCountQuery(primaryKey, tableName, joinQuery, whereClause, groupByClause, havingClause, limitClause string) string {
 
 	if groupByClause == "" {
 
+		// No grouping — flat count. HAVING without GROUP BY is unusual but valid
+		// (it filters the single aggregate row), so we include it here too.
 		return fmt.Sprintf(
-			"SELECT count(%s) as total FROM %s %s WHERE %s ",
-			primaryKey, tableName, joinQuery, whereClause,
+			"SELECT count(%s) AS total FROM %s %s WHERE %s %s",
+			primaryKey, tableName, joinQuery, whereClause, havingClause,
 		)
 	}
 
-	// FIX: wrap grouped query in a subquery so we count groups, not rows.
+	// Grouped path: wrap in subquery so we count groups after HAVING filtering,
+	// not raw rows. LIMIT inside the subquery caps the scan for download functions.
 	inner := fmt.Sprintf(
-		"SELECT %s FROM %s %s WHERE %s %s",
-		primaryKey, tableName, joinQuery, whereClause, groupByClause,
+		"SELECT %s FROM %s %s WHERE %s %s %s %s",
+		primaryKey, tableName, joinQuery, whereClause, groupByClause, havingClause, limitClause,
 	)
 
-	return fmt.Sprintf("SELECT COUNT(*) AS total FROM (%s) AS _count_subquery", inner)
+	return fmt.Sprintf("SELECT count(*) AS total FROM (%s) AS _count_subquery", inner)
 }
 
 func PaginateDataWithContext(ctx context.Context, db *sql.DB, paginator models.Paginator) models.Pagination {
@@ -67,6 +77,7 @@ func PaginateDataWithContext(ctx context.Context, db *sql.DB, paginator models.P
 
 			return strings.Join(orWhere[:], " AND ")
 		}
+
 		return "1"
 	}
 
@@ -120,13 +131,11 @@ func PaginateDataWithContext(ctx context.Context, db *sql.DB, paginator models.P
 		}
 	}
 
-	// FIX: use buildCountQuery so GROUP BY pagination counts groups, not rows.
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	total := 0
 
 	dbUtil := Db{DB: db, Context: ctx}
-
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
 
@@ -194,8 +203,8 @@ func PaginateDataWithContext(ctx context.Context, db *sql.DB, paginator models.P
 		resp.From = from
 		resp.To = 0
 		resp.Data = make(map[string]interface{})
-		return resp
 
+		return resp
 	}
 
 	defer rows.Close()
@@ -301,24 +310,29 @@ func DownloadPaginatedDataWithContext(ctx context.Context, db *sql.DB, paginator
 		hardLimit = 200000
 	}
 
-	// FIX: use buildCountQuery so GROUP BY counts groups, not rows.
-	// For downloads, the hard limit cap is applied after the subquery where relevant.
+	// For downloads, hardLimit caps the inner subquery scan rather than the
+	// outer COUNT result. Appending LIMIT to SELECT COUNT(*) is a no-op since
+	// COUNT always returns one row — the cap must live inside the counted subquery.
 	var countQuery string
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	} else {
 
-		baseCount := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
-		countQuery = fmt.Sprintf("%s LIMIT %d", baseCount, hardLimit)
+		// Pass the LIMIT into buildCountQuery so it is placed inside the inner
+		// subquery (where it actually constrains the rows scanned), not outside
+		// the aggregated COUNT where it would have no effect.
+		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
 
 	}
 
 	total := 0
 
 	dbUtil := Db{DB: db, Context: ctx}
+
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
 
@@ -451,8 +465,7 @@ func PaginateDataSlaveWithContext(ctx context.Context, dbSlave *sql.DB, paginato
 		}
 	}
 
-	// FIX: use buildCountQuery so GROUP BY pagination counts groups, not rows.
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	total := 0
 
@@ -471,7 +484,6 @@ func PaginateDataSlaveWithContext(ctx context.Context, dbSlave *sql.DB, paginato
 	if err != nil {
 
 		log.Printf("got error retrieving total number of records %s ", err.Error())
-
 		return models.Pagination{}
 	}
 
@@ -629,21 +641,19 @@ func DownloadPaginatedDataSlaveWithContext(ctx context.Context, dbSlave *sql.DB,
 
 	hardLimit, _ := strconv.ParseInt(os.Getenv("HARD_SQL_FETCH_LIMIT"), 10, 64)
 	if hardLimit == 0 {
-
 		hardLimit = 200000
 	}
 
-	// FIX: use buildCountQuery so GROUP BY counts groups, not rows.
 	var countQuery string
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	} else {
 
-		baseCount := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
-		countQuery = fmt.Sprintf("%s LIMIT %d", baseCount, hardLimit)
+		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
 
 	}
 

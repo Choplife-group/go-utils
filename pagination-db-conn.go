@@ -92,12 +92,12 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 		}
 	}
 
-	// FIX: use buildCountQuery so GROUP BY pagination counts groups, not rows.
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	total := 0
 
 	dbUtil := Db{DBConn: db, Context: ctx}
+
 	dbUtil.SetQuery(countQuery)
 	dbUtil.SetParams(params...)
 
@@ -179,7 +179,6 @@ func PaginateDataWithContextWithDbConn(ctx context.Context, db *sql.Conn, pagina
 	resp.From = from
 	resp.To = offset + len(data)
 	resp.Data = data
-
 	return resp
 }
 
@@ -269,21 +268,19 @@ func DownloadPaginatedDataWithContextWithDbConn(ctx context.Context, db *sql.Con
 
 	hardLimit, _ := strconv.ParseInt(os.Getenv("HARD_SQL_FETCH_LIMIT"), 10, 64)
 	if hardLimit == 0 {
-
 		hardLimit = 200000
 	}
 
-	// FIX: use buildCountQuery so GROUP BY counts groups, not rows.
 	var countQuery string
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	} else {
 
-		baseCount := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
-		countQuery = fmt.Sprintf("%s LIMIT %d", baseCount, hardLimit)
+		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
 
 	}
 
@@ -422,8 +419,7 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 		}
 	}
 
-	// FIX: use buildCountQuery so GROUP BY pagination counts groups, not rows.
-	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+	countQuery := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	total := 0
 
@@ -442,7 +438,6 @@ func PaginateDataSlaveWithContextWithDbConn(ctx context.Context, dbSlave *sql.Co
 	if err != nil {
 
 		log.Printf("got error retrieving total number of records %s ", err.Error())
-
 		return models.Pagination{}
 	}
 
@@ -600,21 +595,19 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 
 	hardLimit, _ := strconv.ParseInt(os.Getenv("HARD_SQL_FETCH_LIMIT"), 10, 64)
 	if hardLimit == 0 {
-
 		hardLimit = 200000
 	}
 
-	// FIX: use buildCountQuery so GROUP BY counts groups, not rows.
 	var countQuery string
 
 	if hardLimit == -1 {
 
-		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), "")
 
 	} else {
 
-		baseCount := buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group())
-		countQuery = fmt.Sprintf("%s LIMIT %d", baseCount, hardLimit)
+		limitClause := fmt.Sprintf("LIMIT %d", hardLimit)
+		countQuery = buildCountQuery(primaryKey, tableName, joinQuery, whereQuery(), group(), havingQuery(), limitClause)
 
 	}
 
@@ -662,7 +655,6 @@ func DownloadPaginatedDataSlaveWithContextWithDbConn(ctx context.Context, dbSlav
 	if err != nil {
 
 		log.Printf("error pulling vuetable data %s", err.Error())
-
 		return nil, headers
 
 	}
