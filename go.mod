@@ -1,4 +1,4 @@
-module github.com/choplife-group/go-utils
+module github.com/HeyTwoHeads/go-utils
 
 go 1.24.0
 
