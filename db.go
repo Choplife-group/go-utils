@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 )
 
-// Db router and DB instance
 type Db struct {
 	DBConn      *sql.Conn
 	DB          *sql.DB
@@ -26,11 +26,8 @@ const DbError = "Got error  preparing a.Query %s a.Params %v error %s "
 
 func (a *Db) StartTransaction() error {
 
-	if a.Dialect == "postgres" {
-
-		return fmt.Errorf("transactions are not implemented for %s", a.Dialect)
-
-	}
+	// FIX: postgres supports transactions; removed the early-return error for postgres.
+	// The standard sql.DB transaction API works the same for both dialects.
 
 	if a.DBConn != nil {
 
@@ -68,7 +65,6 @@ func (a *Db) Rollback() error {
 	}
 
 	return a.TX.Rollback()
-
 }
 
 func (a *Db) Commit() error {
@@ -96,7 +92,6 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 		}
 
 		return lastInsertId.Int64, nil
-
 	}
 
 	var stmt *sql.Stmt
@@ -118,7 +113,6 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 			log.Printf(DbError, a.Query, a.Params, err.Error())
 			return 0, err
 		}
-
 	}
 
 	defer stmt.Close()
@@ -143,8 +137,8 @@ func (a *Db) InsertQueryWithContext() (lastInsertID int64, err error) {
 func (a *Db) InsertQuery() (lastInsertID int64, err error) {
 
 	a.Context = context.TODO()
-	return a.InsertQueryWithContext()
 
+	return a.InsertQueryWithContext()
 }
 
 func (a *Db) InsertQueryWithContextTx() (lastInsertID int64, err error) {
@@ -274,13 +268,13 @@ func (a *Db) UpdateQueryWithContextTx() (rowsAffected int64, err error) {
 		return 0, err
 	}
 
-	rowsaffected, err := res.RowsAffected()
+	rowsAffected, err = res.RowsAffected()
 	if err != nil {
 		log.Printf(DbError, a.Query, a.Params, err.Error())
 		return 0, err
 	}
 
-	return rowsaffected, nil
+	return rowsAffected, nil
 }
 
 func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
@@ -314,7 +308,12 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	stmt, err := a.TX.PrepareContext(a.Context, a.Query)
 	if err != nil {
 
+		if wasNil {
+			_ = a.TX.Rollback()
+		}
+
 		log.Printf(DbError, a.Query, a.Params, err.Error())
+
 		return nil, err
 	}
 
@@ -324,10 +323,11 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	if err != nil {
 
 		if wasNil {
-
 			_ = a.TX.Rollback()
 		}
+
 		log.Printf(DbError, a.Query, a.Params, err.Error())
+
 		return nil, err
 	}
 
@@ -335,16 +335,24 @@ func (a *Db) InsertInTransactionWithContext() (lastInsertID *int64, err error) {
 	if err != nil {
 
 		if wasNil {
-
 			_ = a.TX.Rollback()
 		}
+
 		log.Printf(DbError, a.Query, a.Params, err.Error())
+
 		return nil, err
 	}
 
+	// FIX: only commit if this function opened the transaction (wasNil).
+	// Previously, Rollback was called unconditionally here — even on success —
+	// which discarded the insert and broke any caller-managed transaction.
 	if wasNil {
+		commitErr := a.TX.Commit()
+		if commitErr != nil {
+			log.Printf("Error committing transaction... %s", commitErr.Error())
 
-		_ = a.TX.Rollback()
+			return nil, commitErr
+		}
 	}
 
 	return &lastInsertId, nil
@@ -358,10 +366,6 @@ func (a *Db) InsertInTransaction() (lastInsertID *int64, err error) {
 }
 
 func (a *Db) InsertIgnoreWithContext() (lastInsertID *int64, err error) {
-
-	if a.Dialect == "postgres" {
-
-	}
 
 	var stmt *sql.Stmt
 
@@ -530,7 +534,7 @@ func (a *Db) FetchOneWithContext() *sql.Row {
 
 	a.removeValidParameters()
 
-	if a.Params == nil || len(a.Params) == 0 {
+	if len(a.Params) == 0 {
 
 		if a.DBConn != nil {
 
@@ -583,7 +587,7 @@ func (a *Db) FetchOneSlaveWithContext() *sql.Row {
 
 	a.removeValidParameters()
 
-	if a.Params == nil || len(a.Params) == 0 {
+	if len(a.Params) == 0 {
 
 		if a.DBConnSlave != nil {
 
@@ -629,7 +633,7 @@ func (a *Db) FetchWithContext() (*sql.Rows, error) {
 
 	a.removeValidParameters()
 
-	if a.Params == nil || len(a.Params) == 0 {
+	if len(a.Params) == 0 {
 
 		if a.DBConn != nil {
 
@@ -705,7 +709,7 @@ func (a *Db) FetchSlaveWithContext() (*sql.Rows, error) {
 
 	a.removeValidParameters()
 
-	if a.Params == nil || len(a.Params) == 0 {
+	if len(a.Params) == 0 {
 
 		if a.DBConnSlave != nil {
 
@@ -760,9 +764,26 @@ func (a *Db) SetQuery(query string) {
 	a.Query = query
 }
 
-func (a *Db) setResults(result ...interface{}) {
+// sortedKeysAndValues returns map keys in sorted order alongside their
+// corresponding values. This guarantees that column lists and placeholder
+// lists are built in a consistent, deterministic order — critical because
+// Go map iteration order is randomized and mismatches cause silent data
+// corruption or wrong-column writes.
+func sortedKeysAndValues(data map[string]interface{}) (keys []string, values []interface{}) {
 
-	a.Result = result
+	keys = make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+
+	sort.Strings(keys)
+
+	values = make([]interface{}, 0, len(data))
+	for _, k := range keys {
+		values = append(values, data[k])
+	}
+
+	return keys, values
 }
 
 func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (int64, error) {
@@ -770,16 +791,16 @@ func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (i
 	var placeHoldersParts, columns []string
 	var params []interface{}
 
-	x := 0
+	// FIX: iterate in sorted key order to guarantee columns and placeholders align.
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-	for column, param := range data {
+	for x, column := range sortedKeys {
 
-		x++
-		params = append(params, param)
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -792,6 +813,7 @@ func (a *Db) InsertWithContext(tableName string, data map[string]interface{}) (i
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContext()
 }
 
@@ -815,16 +837,15 @@ func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) 
 	var placeHoldersParts, columns []string
 	var params []interface{}
 
-	x := 0
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-	for column, param := range data {
+	for x, column := range sortedKeys {
 
-		x++
-		params = append(params, param)
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -837,6 +858,7 @@ func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) 
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContextTx()
 }
 
@@ -845,16 +867,15 @@ func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, up
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	x := 0
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-	for column, param := range data {
+	for x, column := range sortedKeys {
 
-		x++
-		params = append(params, param)
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -879,6 +900,7 @@ func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, up
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContext()
 }
 
@@ -902,16 +924,15 @@ func (a *Db) UpsertWithContextTx(tableName string, data map[string]interface{}, 
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	x := 0
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-	for column, param := range data {
+	for x, column := range sortedKeys {
 
-		x++
-		params = append(params, param)
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -936,6 +957,7 @@ func (a *Db) UpsertWithContextTx(tableName string, data map[string]interface{}, 
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContextTx()
 }
 
@@ -944,11 +966,13 @@ func (a *Db) UpdateWithContext(tableName string, andCondition, data map[string]i
 	var conditions, columns []string
 	var params []interface{}
 
-	x := 0
-	for column, param := range data {
+	sortedDataKeys, sortedDataValues := sortedKeysAndValues(data)
 
-		x++
-		params = append(params, param)
+	x := 0
+	for i, column := range sortedDataKeys {
+
+		x = i + 1
+		params = append(params, sortedDataValues[i])
 		if a.Dialect == "postgres" {
 
 			columns = append(columns, fmt.Sprintf("%s = $%d ", column, x))
@@ -960,7 +984,9 @@ func (a *Db) UpdateWithContext(tableName string, andCondition, data map[string]i
 		}
 	}
 
-	for column, value := range andCondition {
+	sortedCondKeys, sortedCondValues := sortedKeysAndValues(andCondition)
+
+	for _, column := range sortedCondKeys {
 
 		x++
 		if a.Dialect == "postgres" {
@@ -973,7 +999,7 @@ func (a *Db) UpdateWithContext(tableName string, andCondition, data map[string]i
 
 		}
 
-		params = append(params, value)
+		params = append(params, sortedCondValues[x-len(sortedDataKeys)-1])
 
 	}
 
@@ -981,6 +1007,7 @@ func (a *Db) UpdateWithContext(tableName string, andCondition, data map[string]i
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.UpdateQueryWithContext()
 }
 
@@ -1004,11 +1031,13 @@ func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string
 	var conditions, columns []string
 	var params []interface{}
 
-	x := 0
-	for column, param := range data {
+	sortedDataKeys, sortedDataValues := sortedKeysAndValues(data)
 
-		x++
-		params = append(params, param)
+	x := 0
+	for i, column := range sortedDataKeys {
+
+		x = i + 1
+		params = append(params, sortedDataValues[i])
 		if a.Dialect == "postgres" {
 
 			columns = append(columns, fmt.Sprintf("%s = $%d ", column, x))
@@ -1020,7 +1049,9 @@ func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string
 		}
 	}
 
-	for column, value := range andCondition {
+	sortedCondKeys, sortedCondValues := sortedKeysAndValues(andCondition)
+
+	for _, column := range sortedCondKeys {
 
 		x++
 		if a.Dialect == "postgres" {
@@ -1033,7 +1064,7 @@ func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string
 
 		}
 
-		params = append(params, value)
+		params = append(params, sortedCondValues[x-len(sortedDataKeys)-1])
 
 	}
 
@@ -1041,6 +1072,7 @@ func (a *Db) UpdateWithContextTx(tableName string, andCondition, data map[string
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.UpdateQueryWithContextTx()
 }
 
@@ -1049,20 +1081,20 @@ func (a *Db) DeleteWithContext(tableName string, andCondition map[string]interfa
 	var conditions []string
 	var params []interface{}
 
-	x := 0
-	for column, value := range andCondition {
+	sortedKeys, sortedValues := sortedKeysAndValues(andCondition)
 
-		x++
+	for x, column := range sortedKeys {
+
 		if a.Dialect == "postgres" {
 
-			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x+1))
 
 		} else {
 
 			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
 
 		}
-		params = append(params, value)
+		params = append(params, sortedValues[x])
 	}
 
 	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s ", tableName, strings.Join(conditions, " AND "))
@@ -1092,26 +1124,27 @@ func (a *Db) DeleteWithContextTx(tableName string, andCondition map[string]inter
 	var conditions []string
 	var params []interface{}
 
-	x := 0
-	for column, value := range andCondition {
+	sortedKeys, sortedValues := sortedKeysAndValues(andCondition)
 
-		x++
+	for x, column := range sortedKeys {
+
 		if a.Dialect == "postgres" {
 
-			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x))
+			conditions = append(conditions, fmt.Sprintf("%s = $%d ", column, x+1))
 
 		} else {
 
 			conditions = append(conditions, fmt.Sprintf("%s = ? ", column))
 
 		}
-		params = append(params, value)
+		params = append(params, sortedValues[x])
 	}
 
 	sqlQueryParts := fmt.Sprintf("DELETE FROM %s WHERE %s ", tableName, strings.Join(conditions, " AND "))
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.UpdateQueryWithContextTx()
 }
 
@@ -1120,16 +1153,16 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	x := 0
-	for column, param := range data {
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-		x++
-		params = append(params, param)
+	for x, column := range sortedKeys {
+
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -1146,7 +1179,6 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 
 			if a.Dialect == "postgres" {
 
-				//excluded.
 				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
 
 			} else {
@@ -1189,6 +1221,7 @@ func (a *Db) UpsertDataWithContext(tableName string, primaryKey string, data map
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContext()
 }
 
@@ -1212,16 +1245,16 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 	var placeHoldersParts, updatesPart, columns []string
 	var params []interface{}
 
-	x := 0
-	for column, param := range data {
+	sortedKeys, sortedValues := sortedKeysAndValues(data)
 
-		x++
-		params = append(params, param)
+	for x, column := range sortedKeys {
+
+		params = append(params, sortedValues[x])
 		columns = append(columns, column)
 
 		if a.Dialect == "postgres" {
 
-			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x))
+			placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("$%d", x+1))
 
 		} else {
 
@@ -1238,7 +1271,6 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 
 			if a.Dialect == "postgres" {
 
-				//excluded.
 				updatesPart = append(updatesPart, fmt.Sprintf("%s=excluded.%s", f, f))
 
 			} else {
@@ -1281,6 +1313,7 @@ func (a *Db) UpsertDataWithContextTx(tableName string, primaryKey string, data m
 
 	a.SetQuery(sqlQueryParts)
 	a.SetParams(params...)
+
 	return a.InsertQueryWithContextTx()
 }
 
