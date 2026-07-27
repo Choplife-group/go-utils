@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -23,6 +24,9 @@ import (
 //	S3_REGION             (optional) defaults to "fsn1"
 //	S3_ENDPOINT           (optional) defaults to "https://<region>.your-objectstorage.com"
 //	S3_PUBLIC_URL         (optional) base URL for returned links; defaults to the endpoint
+//	S3_ACL                (optional) canned ACL to set on upload, e.g. "public-read".
+//	                      Leave empty for providers that disable object ACLs
+//	                      (e.g. Cloudflare R2) and rely on bucket-level public access.
 
 const defaultS3Region = "fsn1"
 
@@ -34,6 +38,7 @@ type s3Config struct {
 	region    string
 	endpoint  string
 	publicURL string
+	acl       string
 }
 
 // loadS3Config reads and validates the S3 settings from the environment.
@@ -45,6 +50,7 @@ func loadS3Config() (s3Config, error) {
 		region:    os.Getenv("S3_REGION"),
 		endpoint:  os.Getenv("S3_ENDPOINT"),
 		publicURL: os.Getenv("S3_PUBLIC_URL"),
+		acl:       os.Getenv("S3_ACL"),
 	}
 
 	if cfg.accessKey == "" || cfg.secretKey == "" || cfg.bucket == "" {
@@ -103,17 +109,37 @@ func UploadToS3(ctx context.Context, data []byte, remotePath string) (string, er
 		return "", err
 	}
 
-	_, err = client.PutObject(ctx, &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(cfg.bucket),
 		Key:    aws.String(remotePath),
 		Body:   bytes.NewReader(data),
-		ACL:    types.ObjectCannedACLPublicRead,
-	})
-	if err != nil {
+	}
+
+	// Only set an object ACL when explicitly configured. Providers such as
+	// Cloudflare R2 and ACL-disabled S3 buckets reject a canned ACL; those rely
+	// on bucket-level public access instead.
+	if cfg.acl != "" {
+		input.ACL = types.ObjectCannedACL(cfg.acl)
+	}
+
+	if _, err = client.PutObject(ctx, input); err != nil {
 		return "", err
 	}
 
-	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(cfg.publicURL, "/"), cfg.bucket, remotePath), nil
+	// The object Key is stored raw, but the returned URL must be escaped so keys
+	// containing characters like '#' or '?' resolve to the same object.
+	return fmt.Sprintf("%s/%s/%s", strings.TrimRight(cfg.publicURL, "/"), cfg.bucket, escapeObjectPath(remotePath)), nil
+}
+
+// escapeObjectPath URL-escapes each segment of an object key while preserving
+// the '/' separators, so the returned link points at the uploaded key.
+func escapeObjectPath(key string) string {
+	segments := strings.Split(key, "/")
+	for i, s := range segments {
+		segments[i] = url.PathEscape(s)
+	}
+
+	return strings.Join(segments, "/")
 }
 
 // DeleteFromS3 removes the object at remotePath from S3-compatible object storage.
