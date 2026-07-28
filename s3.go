@@ -30,6 +30,17 @@ import (
 
 const defaultS3Region = "fsn1"
 
+// supportedS3ACLs is the set of canned ACLs accepted for S3_ACL.
+var supportedS3ACLs = map[string]bool{
+	string(types.ObjectCannedACLPrivate):                true,
+	string(types.ObjectCannedACLPublicRead):             true,
+	string(types.ObjectCannedACLPublicReadWrite):        true,
+	string(types.ObjectCannedACLAuthenticatedRead):      true,
+	string(types.ObjectCannedACLAwsExecRead):            true,
+	string(types.ObjectCannedACLBucketOwnerRead):        true,
+	string(types.ObjectCannedACLBucketOwnerFullControl): true,
+}
+
 // s3Config holds the resolved storage settings read from the environment.
 type s3Config struct {
 	accessKey string
@@ -67,6 +78,10 @@ func loadS3Config() (s3Config, error) {
 
 	if cfg.publicURL == "" {
 		cfg.publicURL = cfg.endpoint
+	}
+
+	if cfg.acl != "" && !supportedS3ACLs[cfg.acl] {
+		return s3Config{}, fmt.Errorf("unsupported S3_ACL %q", cfg.acl)
 	}
 
 	return cfg, nil
@@ -133,10 +148,19 @@ func UploadToS3(ctx context.Context, data []byte, remotePath string) (string, er
 
 // escapeObjectPath URL-escapes each segment of an object key while preserving
 // the '/' separators, so the returned link points at the uploaded key.
+// Period-only segments ("." and "..") are percent-encoded so URL clients and
+// proxies cannot normalize them away and resolve to a different object.
 func escapeObjectPath(key string) string {
 	segments := strings.Split(key, "/")
 	for i, s := range segments {
-		segments[i] = url.PathEscape(s)
+		switch s {
+		case ".":
+			segments[i] = "%2E"
+		case "..":
+			segments[i] = "%2E%2E"
+		default:
+			segments[i] = url.PathEscape(s)
+		}
 	}
 
 	return strings.Join(segments, "/")

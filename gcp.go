@@ -33,13 +33,10 @@ func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string)
 	}
 	defer client.Close()
 
-	bh := client.Bucket(remoteBucket)
-	// Next check if the bucket exists
-	if _, err = bh.Attrs(ctx); err != nil {
-		return "", err
-	}
-
-	obj := bh.Object(remotePath)
+	// Write straight to the object; a missing/unreachable bucket surfaces on
+	// Write/Close, so no separate bucket-metadata preflight (which would require
+	// storage.buckets.get on an otherwise object-create-only principal).
+	obj := client.Bucket(remoteBucket).Object(remotePath)
 
 	w := obj.NewWriter(ctx)
 	if _, err = w.Write(data); err != nil {
@@ -50,11 +47,15 @@ func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string)
 		return "", err
 	}
 
+	// The object is now committed. If making it public fails (e.g. the bucket
+	// uses uniform bucket-level access where object ACLs are unsupported), delete
+	// the just-written object so we don't leave a private orphan behind.
 	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		_ = obj.Delete(ctx)
 		return "", err
 	}
 
-	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", remoteBucket, remotePath), nil
+	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", remoteBucket, escapeObjectPath(remotePath)), nil
 }
 
 // DeleteFromGCP removes the object at remotePath from the GCLOUD_BUCKET bucket.
