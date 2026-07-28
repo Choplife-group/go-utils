@@ -1,16 +1,12 @@
 package library
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"path"
 	"strconv"
 	"strings"
 
-	"cloud.google.com/go/storage"
 	"github.com/go-cmd/cmd"
-	"google.golang.org/api/option"
 )
 
 func NumberOfLines(file string) int {
@@ -79,48 +75,4 @@ func RandomFileName(length int) (string, error) {
 	}
 
 	return code, nil
-}
-
-// UploadToGCPWithContext uploads a file to a Google Cloud Storage bucket
-// We need to set the following environment variables:
-// GCLOUD_BUCKET is the name of the bucket to upload to
-// GCLOUD_STORAGE_CREDENTIALS_PATH is the path to the credentials file
-func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string) (string, error) {
-	remoteBucket := os.Getenv("GCLOUD_BUCKET")
-
-	credentialsPath := os.Getenv("GCLOUD_STORAGE_CREDENTIALS_PATH")
-
-	client, err := storage.NewClient(ctx, option.WithCredentialsFile(credentialsPath))
-	if err != nil {
-		return "", err
-	}
-
-	bh := client.Bucket(remoteBucket)
-	// Next check if the bucket exists
-	if _, err = bh.Attrs(ctx); err != nil {
-		return "", err
-	}
-
-	obj := bh.Object(remotePath)
-
-	w := obj.NewWriter(ctx)
-	_, err = w.Write(data)
-	if err != nil {
-		
-
-		return "", err
-	}
-
-	err = w.Close()
-	if err != nil {
-		return "", err
-	}
-
-	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
-		return "", err
-	}
-
-	pathURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", remoteBucket, remotePath)
-
-	return pathURL, nil
 }
