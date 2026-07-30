@@ -3,7 +3,7 @@
 //
 // It installs, in one place so it can't drift across services:
 //   - structured JSON logging to stdout (Alloy ships stdout → Loki);
-//   - a per-request access log as JSON (method/status/latency/uri/...), on a
+//   - a per-request access log as JSON (method/status/latency/path/...), on a
 //     dedicated logger so high-volume access logs go only to stdout, not to any
 //     tracing hook the service may have added to the global logrus;
 //   - a Prometheus /metrics endpoint (subsystem "echo", the fleet-wide convention
@@ -73,11 +73,9 @@ func Setup(e *echo.Echo, opts Options) {
 	opts.applyDefaults()
 	skipMetrics := func(c echo.Context) bool { return c.Path() == opts.MetricsPath }
 
-	// Global logrus → JSON on stdout.
 	logrus.SetFormatter(jsonFormatter())
 	logrus.SetOutput(os.Stdout)
 
-	// Gzip that skips the metrics path.
 	if !opts.DisableGzip {
 		e.Use(echomw.GzipWithConfig(echomw.GzipConfig{Skipper: skipMetrics}))
 	}
@@ -87,9 +85,9 @@ func Setup(e *echo.Echo, opts Options) {
 	access.SetFormatter(jsonFormatter())
 	access.SetOutput(os.Stdout)
 	e.Use(echomw.RequestLoggerWithConfig(echomw.RequestLoggerConfig{
-		Skipper:      skipMetrics,
-		LogMethod:    true,
-		LogURI:       true,
+		Skipper:   skipMetrics,
+		LogMethod: true,
+		LogURIPath:   true,
 		LogStatus:    true,
 		LogLatency:   true,
 		LogRemoteIP:  true,
@@ -101,7 +99,7 @@ func Setup(e *echo.Echo, opts Options) {
 			entry := access.WithFields(logrus.Fields{
 				"type":       "access",
 				"method":     v.Method,
-				"uri":        v.URI,
+				"path":       v.URIPath,
 				"status":     v.Status,
 				"latency_ms": float64(v.Latency.Nanoseconds()) / 1e6,
 				"remote_ip":  v.RemoteIP,
@@ -122,7 +120,18 @@ func Setup(e *echo.Echo, opts Options) {
 		},
 	}))
 
-	// Prometheus metrics middleware + endpoint.
-	e.Use(echoprometheus.NewMiddleware(opts.MetricsSubsystem))
+	e.Use(echoprometheus.NewMiddlewareWithConfig(echoprometheus.MiddlewareConfig{
+		Subsystem: opts.MetricsSubsystem,
+		Skipper:   skipMetrics,
+		LabelFuncs: map[string]echoprometheus.LabelValueFunc{
+			"host": func(c echo.Context, err error) string { return "" },
+			"url": func(c echo.Context, err error) string {
+				if p := c.Path(); p != "" {
+					return p
+				}
+				return "unmatched"
+			},
+		},
+	}))
 	e.GET(opts.MetricsPath, echoprometheus.NewHandler())
 }
