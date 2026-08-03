@@ -241,6 +241,21 @@ func ToMysql(t time.Time) string {
 	return t.Format(StandardDateFormat)
 }
 
+// ParseLocalTime parses a "2006-01-02 15:04:05" string whose wall clock is already local time —
+// a MySQL DATETIME, a request field, another service's response — and returns it in time.Local.
+// time.Parse would read the same string as UTC and shift the instant by the local offset. Use
+// time.Parse for inputs that carry their own offset. Empty input returns the zero time and a nil
+// error; a malformed one returns the parse error.
+func ParseLocalTime(value string) (time.Time, error) {
+
+	if len(strings.TrimSpace(value)) == 0 {
+
+		return time.Time{}, nil
+	}
+
+	return time.ParseInLocation(StandardDateFormat, value, time.Local)
+}
+
 func CombinedDateTime(dateDate time.Time, timeString string) time.Time {
 
 	dt := dateDate.Format(DateFormat)
