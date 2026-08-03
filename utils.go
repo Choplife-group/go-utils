@@ -241,6 +241,20 @@ func ToMysql(t time.Time) string {
 	return t.Format(StandardDateFormat)
 }
 
+// ParseTime parses a MySQL DATETIME in the service's local zone, which is the zone the
+// value was stored in. Prefer it to time.Parse, which pins a zoneless layout to UTC and
+// so lands on the wrong instant in any market that is not UTC+0. Empty input returns the
+// zero time, not an error.
+func ParseTime(value string) (time.Time, error) {
+
+	if len(strings.TrimSpace(value)) == 0 {
+
+		return time.Time{}, nil
+	}
+
+	return time.ParseInLocation(StandardDateFormat, value, time.Local)
+}
+
 func CombinedDateTime(dateDate time.Time, timeString string) time.Time {
 
 	dt := dateDate.Format(DateFormat)
