@@ -17,18 +17,18 @@ type VueTable struct {
 }
 
 type Paginator struct {
-	VueTable VueTable
-	TableName string
+	Dialect    string
+	VueTable   VueTable
+	TableName  string
 	PrimaryKey string
-	Fields []string
-	Joins []string
-	GroupBy []string
-	OrWhere [] string
-	Having [] string
-	Params []interface{}
-	Results func(row *sql.Rows) [] interface{}
+	Fields     []string
+	Joins      []string
+	GroupBy    []string
+	OrWhere    []string
+	Having     []string
+	Params     []interface{}
+	Results    func(row *sql.Rows) []interface{}
 }
-
 
 type Pagination struct {
 	Total       int         `json:"total"`

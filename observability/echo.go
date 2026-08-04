@@ -1,3 +1,15 @@
+package observability
+
+import (
+	"os"
+	"time"
+
+	"github.com/labstack/echo-contrib/echoprometheus"
+	"github.com/labstack/echo/v4"
+	echomw "github.com/labstack/echo/v4/middleware"
+	"github.com/sirupsen/logrus"
+)
+
 // Package observability wires an Echo service into the ChopWin Grafana stack
 // (Prometheus metrics + Loki logs) with a single call.
 //
@@ -14,17 +26,6 @@
 //
 // Distributed tracing is intentionally NOT touched here — the caller keeps its own
 // tracer/exporter setup.
-package observability
-
-import (
-	"os"
-	"time"
-
-	"github.com/labstack/echo-contrib/echoprometheus"
-	"github.com/labstack/echo/v4"
-	echomw "github.com/labstack/echo/v4/middleware"
-	"github.com/sirupsen/logrus"
-)
 
 // Options configures Setup. The zero value is valid and gives sensible defaults.
 type Options struct {
@@ -85,8 +86,8 @@ func Setup(e *echo.Echo, opts Options) {
 	access.SetFormatter(jsonFormatter())
 	access.SetOutput(os.Stdout)
 	e.Use(echomw.RequestLoggerWithConfig(echomw.RequestLoggerConfig{
-		Skipper:   skipMetrics,
-		LogMethod: true,
+		Skipper:      skipMetrics,
+		LogMethod:    true,
 		LogURIPath:   true,
 		LogStatus:    true,
 		LogLatency:   true,
@@ -106,16 +107,21 @@ func Setup(e *echo.Echo, opts Options) {
 				"user_agent": v.UserAgent,
 				"request_id": v.RequestID,
 			})
+
 			switch {
+
 			case v.Error != nil:
 				entry.WithField("error", v.Error.Error()).Error("request")
+
 			case v.Status >= 500:
 				entry.Error("request")
 			case v.Status >= 400:
 				entry.Warn("request")
+
 			default:
 				entry.Info("request")
 			}
+
 			return nil
 		},
 	}))

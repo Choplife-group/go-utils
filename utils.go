@@ -33,7 +33,7 @@ func GetString(payload map[string]interface{}, name string, defaults string) (st
 
 	if payload[name] == nil {
 
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 	}
 
 	v := reflect.ValueOf(payload[name])
@@ -69,7 +69,7 @@ func GetFloat(payload map[string]interface{}, name string, defaults float64) (fl
 
 	if payload[name] == nil {
 
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 	}
 
 	v := reflect.ValueOf(payload[name])
@@ -77,7 +77,7 @@ func GetFloat(payload map[string]interface{}, name string, defaults float64) (fl
 	switch v.Kind() {
 
 	case reflect.Invalid:
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return float64(v.Int()), nil
@@ -90,7 +90,7 @@ func GetFloat(payload map[string]interface{}, name string, defaults float64) (fl
 	// ...floating-point and complex cases omitted for brevity...
 	case reflect.Bool:
 		//return strconv.FormatBool(v.Bool())
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 
 	case reflect.String:
 		val, err := strconv.ParseFloat(v.String(), 64)
@@ -104,7 +104,7 @@ func GetFloat(payload map[string]interface{}, name string, defaults float64) (fl
 
 	default: // reflect.Array, reflect.Struct, reflect.Interface
 		//return v.Type().String() + " value"
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 	}
 
 }
@@ -113,7 +113,7 @@ func GetInt64(payload map[string]interface{}, name string, defaults int64) (int6
 
 	if payload[name] == nil {
 
-		return defaults, errors.New(fmt.Sprintf("value %s not set", name))
+		return defaults, fmt.Errorf("value %s not set", name)
 	}
 
 	v := reflect.ValueOf(payload[name])
@@ -121,7 +121,7 @@ func GetInt64(payload map[string]interface{}, name string, defaults int64) (int6
 	switch v.Kind() {
 
 	case reflect.Invalid:
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return v.Int(), nil
@@ -134,7 +134,7 @@ func GetInt64(payload map[string]interface{}, name string, defaults int64) (int6
 	// ...floating-point and complex cases omitted for brevity...
 	case reflect.Bool:
 		//return strconv.FormatBool(v.Bool())
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 
 	case reflect.String:
 		val, err := strconv.ParseInt(v.String(), 10, 64)
@@ -148,7 +148,7 @@ func GetInt64(payload map[string]interface{}, name string, defaults int64) (int6
 
 	default: // reflect.Array, reflect.Struct, reflect.Interface
 		//return v.Type().String() + " value"
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 	}
 
 }
@@ -165,7 +165,7 @@ func GetBool(payload map[string]interface{}, name string, defaults bool) (bool, 
 	switch v.Kind() {
 
 	case reflect.Invalid:
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return v.Int() == 1, nil
@@ -189,7 +189,7 @@ func GetBool(payload map[string]interface{}, name string, defaults bool) (bool, 
 		return val == 1, nil
 
 	default:
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 	}
 }
 
@@ -197,7 +197,7 @@ func GetInt64Value(payload interface{}, defaults int64) (int64, error) {
 
 	if payload == nil {
 
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 	}
 
 	v := reflect.ValueOf(payload)
@@ -205,7 +205,7 @@ func GetInt64Value(payload interface{}, defaults int64) (int64, error) {
 	switch v.Kind() {
 
 	case reflect.Invalid:
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return v.Int(), nil
@@ -217,7 +217,7 @@ func GetInt64Value(payload interface{}, defaults int64) (int64, error) {
 		return int64(v.Uint()), nil
 	// ...floating-point and complex cases omitted for brevity...
 	case reflect.Bool:
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 
 	case reflect.String:
 		val, err := strconv.ParseInt(v.String(), 10, 64)
@@ -231,7 +231,7 @@ func GetInt64Value(payload interface{}, defaults int64) (int64, error) {
 
 	default: // reflect.Array, reflect.Struct, reflect.Interface
 		//return v.Type().String() + " value"
-		return defaults, errors.New(fmt.Sprintf(notSetError))
+		return defaults, fmt.Errorf(notSetError)
 	}
 
 }
@@ -281,17 +281,17 @@ func StringToTime(stringTime string) time.Time {
 		return time.Now()
 	}
 
-	parts := strings.Split(stringTime," ")
+	parts := strings.Split(stringTime, " ")
 	if len(parts) == 1 {
 
-		stringTime = fmt.Sprintf("%s 00:00:00",parts[0])
+		stringTime = fmt.Sprintf("%s 00:00:00", parts[0])
 	}
 
 	newLayout := StandardDateFormat
 	myTime, err := time.Parse(newLayout, stringTime)
 	if err != nil {
 
-		log.Printf("StringToTime error converting %s to time %s",stringTime,err.Error())
+		log.Printf("StringToTime error converting %s to time %s", stringTime, err.Error())
 	}
 
 	return myTime
@@ -321,7 +321,7 @@ func CalculateTotalPages(total int, perPage int) int {
 
 	totalPages := math.Round(float64(total) / float64(perPage))
 
-	if total > perPage && total % perPage > 0 {
+	if total > perPage && total%perPage > 0 {
 
 		totalPages++
 
@@ -351,7 +351,7 @@ func CronString(repeatType string, repeatIntervalValue string, date string, send
 
 		// expected format
 		// * * * * *
-		cron := fmt.Sprintf("* * * * *")
+		cron := "* * * * *"
 		return &cron, nil
 
 	}
@@ -524,7 +524,6 @@ func NewNetClient() *http.Client {
 			TLSHandshakeTimeout: 60 * time.Second,
 		}
 
-
 		netClient = &http.Client{
 			Timeout:   time.Second * 60,
 			Transport: otelhttp.NewTransport(netTransport),
@@ -662,7 +661,6 @@ func RunCron(cron string) bool {
 		}
 
 	}
-
 
 	// check day of month
 	if next {
@@ -812,7 +810,6 @@ func ValidRunCron(cron string) bool {
 	parts := strings.Split(cron, " ")
 
 	if len(parts) != 5 {
-
 		return false
 	}
 
@@ -862,7 +859,6 @@ func ValidRunCron(cron string) bool {
 			for _, w := range dw_parts {
 
 				if getDayOfWeekNumber(w) == now_day_of_week_number {
-
 					next = true
 				}
 			}
@@ -903,7 +899,6 @@ func ValidRunCron(cron string) bool {
 				for _, w := range dw_parts {
 
 					if getMonthNumber(w) == now_month_number {
-
 						next = true
 					}
 				}
@@ -948,7 +943,6 @@ func ValidRunCron(cron string) bool {
 					ww, _ := strconv.Atoi(w)
 
 					if ww == now_day {
-
 						next = true
 					}
 				}
@@ -993,7 +987,6 @@ func ValidRunCron(cron string) bool {
 					ww, _ := strconv.Atoi(w)
 
 					if ww == now_hour {
-
 						next = true
 					}
 				}
@@ -1038,7 +1031,6 @@ func ValidRunCron(cron string) bool {
 					ww, _ := strconv.Atoi(w)
 
 					if ww == now_min {
-
 						next = true
 					}
 				}
@@ -1072,57 +1064,57 @@ func getMonthNumber(monthName string) int {
 	month := strings.ToLower(monthName)
 
 	switch month {
+
 	case "jan":
 	case "january":
 		return 1
-		break
+
 	case "feb":
 	case "february":
 		return 2
-		break
+
 	case "mar":
 	case "march":
 		return 3
-		break
+
 	case "apr":
 	case "april":
 		return 4
-		break
+
 	case "may":
 		return 5
-		break
+
 	case "jun":
 	case "june":
 		return 6
-		break
+
 	case "jul":
 	case "july":
 		return 7
-		break
+
 	case "aug":
 	case "august":
 		return 8
-		break
+
 	case "sep":
 	case "september":
 		return 9
-		break
+
 	case "oct":
 	case "october":
 		return 10
-		break
+
 	case "nov":
 	case "november":
 		return 11
-		break
+
 	case "dec":
 	case "december":
 		return 12
-		break
+
 	}
 
 	return 0
-
 }
 
 func getDayOfWeekNumber(dayOfWeek string) int {
@@ -1136,47 +1128,48 @@ func getDayOfWeekNumber(dayOfWeek string) int {
 	dayOfWeek = strings.ToLower(RemoveSpaces(dayOfWeek))
 
 	switch dayOfWeek {
+
 	case "sun":
 		return 1
+
 	case "sunday":
 		return 1
-		break
 
 	case "mon":
 		return 2
+
 	case "monday":
 		return 2
-		break
 
 	case "tue":
 		return 3
+
 	case "tuesday":
 		return 3
-		break
 
 	case "wed":
 		return 4
+
 	case "wednesday":
 		return 4
-		break
 
 	case "thu":
 		return 5
+
 	case "thursday":
 		return 5
-		break
 
 	case "fri":
 		return 6
+
 	case "friday":
 		return 6
-		break
 
 	case "sat":
 		return 7
+
 	case "saturday":
 		return 7
-		break
 	}
 
 	return 0
