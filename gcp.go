@@ -2,10 +2,14 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/storage"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -47,15 +51,27 @@ func UploadToGCPWithContext(ctx context.Context, data []byte, remotePath string)
 		return "", err
 	}
 
-	// The object is now committed. If making it public fails (e.g. the bucket
-	// uses uniform bucket-level access where object ACLs are unsupported), delete
-	// the just-written object so we don't leave a private orphan behind.
-	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+	// The object is now committed. Buckets with uniform bucket-level access
+	// reject object ACLs outright and grant public read through bucket IAM
+	// instead, so that rejection is expected and the object is kept. Any other
+	// ACL failure leaves a private orphan, so the object is removed.
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil && !isUniformBucketLevelAccessErr(err) {
 		_ = obj.Delete(ctx)
 		return "", err
 	}
 
 	return fmt.Sprintf("https://storage.googleapis.com/%s/%s", remoteBucket, escapeObjectPath(remotePath)), nil
+}
+
+// isUniformBucketLevelAccessErr reports whether err is the 400 GCS returns when
+// an object ACL is set on a bucket that has uniform bucket-level access enabled.
+func isUniformBucketLevelAccessErr(err error) bool {
+	var apiErr *googleapi.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != http.StatusBadRequest {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(apiErr.Message), "uniform bucket-level access")
 }
 
 // DeleteFromGCP removes the object at remotePath from the GCLOUD_BUCKET bucket.
