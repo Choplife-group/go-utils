@@ -1,0 +1,129 @@
+name: Tag and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to create, e.g. v1.1.0 (leave blank to use bump)"
+        required: false
+        type: string
+      bump:
+        description: "Bump the latest tag instead of naming a version"
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - patch
+          - minor
+          - major
+      create_tag:
+        description: "Create and push the tag"
+        required: false
+        default: true
+        type: boolean
+      create_release:
+        description: "Publish a GitHub release for the tag"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  release:
+    name: Tag and Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build and vet
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Resolve tag
+        id: resolve
+        run: |
+          set -e
+
+          version="${{ inputs.version }}"
+          bump="${{ inputs.bump }}"
+
+          if [ -n "$version" ] && [ "$bump" != "none" ]; then
+            echo "::error::Set either version or bump, not both"
+            exit 1
+          fi
+
+          if [ -z "$version" ]; then
+            if [ "$bump" = "none" ]; then
+              echo "::error::Provide a version (e.g. v1.1.0) or choose a bump"
+              exit 1
+            fi
+
+            latest=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            if [ -z "$latest" ]; then
+              latest="v0.0.0"
+            fi
+            echo "Latest tag: $latest"
+
+            major=$(echo "${latest#v}" | cut -d. -f1)
+            minor=$(echo "${latest#v}" | cut -d. -f2)
+            patch=$(echo "${latest#v}" | cut -d. -f3)
+
+            case "$bump" in
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              patch) patch=$((patch + 1)) ;;
+            esac
+
+            version="v${major}.${minor}.${patch}"
+          fi
+
+          if ! echo "$version" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag must look like v1.2.3 or v1.2.3-rc1, got '$version'"
+            exit 1
+          fi
+
+          echo "tag=$version" >> $GITHUB_OUTPUT
+          echo "Resolved tag: $version"
+
+      - name: Create and push tag
+        if: ${{ inputs.create_tag }}
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -e
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Create release
+        if: ${{ inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve.outputs.tag }}
+          name: ${{ steps.resolve.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.resolve.outputs.tag, '-') }}
+          body: |
+            ```bash
+            go get github.com/choplife-group/go-utils@${{ steps.resolve.outputs.tag }}
+            ```
