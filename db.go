@@ -869,6 +869,99 @@ func (a *Db) InsertWithContextTx(tableName string, data map[string]interface{}) 
 	return a.InsertQueryWithContextTx()
 }
 
+func (a *Db) BulkInsertWithContext(tableName string, rows []map[string]interface{}) (int64, error) {
+
+	query, params, err := a.buildBulkInsertQuery(tableName, rows)
+	if err != nil {
+		return 0, err
+	}
+
+	a.SetQuery(query)
+	a.SetParams(params...)
+
+	var stmt *sql.Stmt
+
+	if a.DBConn != nil {
+
+		stmt, err = a.DBConn.PrepareContext(a.Context, a.Query)
+		if err != nil {
+
+			log.Printf(DbError, a.Query, a.Params, err.Error())
+			return 0, err
+		}
+
+	} else {
+
+		stmt, err = a.DB.PrepareContext(a.Context, a.Query)
+		if err != nil {
+
+			log.Printf(DbError, a.Query, a.Params, err.Error())
+			return 0, err
+		}
+	}
+
+	defer stmt.Close()
+
+	res, err := stmt.ExecContext(a.Context, a.Params...)
+	if err != nil {
+
+		log.Printf(DbError, a.Query, a.Params, err.Error())
+		return 0, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+
+		log.Printf(DbError, a.Query, a.Params, err.Error())
+		return 0, err
+	}
+
+	return rowsAffected, nil
+}
+
+func (a *Db) BulkInsertWithContextTx(tableName string, rows []map[string]interface{}) (int64, error) {
+
+	if a.TX == nil {
+
+		if err := a.StartTransaction(); err != nil {
+			return 0, err
+		}
+	}
+
+	query, params, err := a.buildBulkInsertQuery(tableName, rows)
+	if err != nil {
+		return 0, err
+	}
+
+	a.SetQuery(query)
+	a.SetParams(params...)
+
+	stmt, err := a.TX.PrepareContext(a.Context, a.Query)
+	if err != nil {
+
+		log.Printf(DbError, a.Query, a.Params, err.Error())
+		return 0, err
+	}
+
+	defer stmt.Close()
+
+	res, err := stmt.ExecContext(a.Context, a.Params...)
+	if err != nil {
+
+		log.Printf(DbError, a.Query, a.Params, err.Error())
+		return 0, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+
+		log.Printf(DbError, a.Query, a.Params, err.Error())
+		return 0, err
+	}
+
+	return rowsAffected, nil
+}
+
 func (a *Db) UpsertWithContext(tableName string, data map[string]interface{}, updates []string) (int64, error) {
 
 	var placeHoldersParts, updatesPart, columns []string
@@ -1372,4 +1465,48 @@ func (a *Db) removeValidParameters() {
 	}
 
 	a.Params = par
+}
+
+
+func (a *Db) buildBulkInsertQuery(tableName string, rows []map[string]interface{}) (string, []interface{}, error) {
+
+	if len(rows) == 0 {
+		return "", nil, fmt.Errorf("bulk insert requires at least one row")
+	}
+
+	columns, _ := sortedKeysAndValues(rows[0])
+
+	var placeHoldersParts []string
+	var params []interface{}
+
+	paramIndex := 0
+
+	for _, row := range rows {
+
+		var rowPlaceHolders []string
+
+		for _, column := range columns {
+
+			params = append(params, row[column])
+
+			if a.dialect() == "postgres" {
+
+				paramIndex++
+				rowPlaceHolders = append(rowPlaceHolders, fmt.Sprintf("$%d", paramIndex))
+
+			} else {
+
+				rowPlaceHolders = append(rowPlaceHolders, "?")
+			}
+		}
+
+		placeHoldersParts = append(placeHoldersParts, fmt.Sprintf("(%s)", strings.Join(rowPlaceHolders, ",")))
+	}
+
+	sqlQueryParts := fmt.Sprintf(
+		"INSERT INTO %s (%s) VALUES %s",
+		tableName, strings.Join(columns, ","), strings.Join(placeHoldersParts, ","),
+	)
+
+	return sqlQueryParts, params, nil
 }
