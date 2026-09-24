@@ -1,0 +1,42 @@
+services:
+
+  mysql:
+    image: mysql:8
+    container_name: goutils-test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_DATABASE: goutils_test
+    ports:
+      - "13306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-psecret"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: goutils-test-redis
+    ports:
+      - "16380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: goutils-test-rabbitmq
+    environment:
+      # The image ships a root-owned .erlang.cookie that the server cannot read
+      # on some Docker setups; pointing HOME at a writable path sidesteps it.
+      HOME: /tmp
+    ports:
+      - "15674:5672"
+
+  emqx:
+    image: emqx/emqx:latest
+    container_name: goutils-test-emqx
+    ports:
+      - "11883:1883"

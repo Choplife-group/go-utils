@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  unit:
+    name: Build, vet and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: make check
+
+      - run: make test-race
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The stack runs through the same compose file used locally, so the
+      # broker-restart test can docker restart the container by name.
+      - run: make up
+
+      - run: make wait
+
+      - run: make test-integration-race
+
+      - if: always()
+        run: make down
