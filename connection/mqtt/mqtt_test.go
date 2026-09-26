@@ -22,7 +22,7 @@ func TestConnectRejectsMissingSettings(t *testing.T) {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			client, err := Connect(context.Background(), tc.cfg)
+			client, err := ConnectWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Connect() succeeded, want an error")
@@ -37,7 +37,7 @@ func TestConnectRejectsMissingSettings(t *testing.T) {
 
 func TestConnectReturnsErrorNotClientWhenUnreachable(t *testing.T) {
 
-	client, err := Connect(context.Background(), Config{
+	client, err := ConnectWithContext(context.Background(), Config{
 		Host:           "127.0.0.1",
 		Port:           "1",
 		ConnectTimeout: 500 * time.Millisecond,
@@ -104,7 +104,7 @@ func TestClientIDPrefixFallsBackToServiceName(t *testing.T) {
 // this replaces returns *mqtt.Client and guards nil at each call site instead.
 func TestPublishOnNilClientReturnsError(t *testing.T) {
 
-	if err := Publish(context.Background(), nil, "topic", map[string]string{"a": "b"}); err == nil {
+	if err := PublishWithContext(context.Background(), nil, "topic", map[string]string{"a": "b"}); err == nil {
 		t.Fatal("Publish(nil) succeeded, want an error")
 	}
 }
@@ -113,7 +113,7 @@ func TestPublishRejectsUnencodablePayload(t *testing.T) {
 
 	// A disconnected client is rejected before encoding, so this exercises the
 	// nil-client path only; encoding is covered by the marshal error branch.
-	if err := Publish(context.Background(), nil, "topic", make(chan int)); err == nil {
+	if err := PublishWithContext(context.Background(), nil, "topic", make(chan int)); err == nil {
 		t.Fatal("Publish() succeeded, want an error")
 	}
 }
@@ -148,7 +148,7 @@ func TestPublishRejectsWhileReconnecting(t *testing.T) {
 
 	client := &stubClient{connected: true, open: false}
 
-	err := Publish(context.Background(), client, "topic", map[string]string{"a": "b"})
+	err := PublishWithContext(context.Background(), client, "topic", map[string]string{"a": "b"})
 
 	if err == nil {
 		t.Fatal("Publish() succeeded while the connection was down")
@@ -156,5 +156,38 @@ func TestPublishRejectsWhileReconnecting(t *testing.T) {
 
 	if client.published {
 		t.Fatal("Publish() handed the message to a dead connection")
+	}
+}
+
+func TestPlainVariantsKeepTheContract(t *testing.T) {
+
+	client, err := Connect(Config{})
+	if err == nil {
+		t.Fatal("Connect() with no settings succeeded")
+	}
+
+	if client != nil {
+		t.Fatal("Connect() returned a client alongside an error")
+	}
+
+	if err := Publish(nil, "topic", map[string]string{"a": "b"}); err == nil {
+		t.Fatal("Publish(nil) succeeded, want an error")
+	}
+
+	if err := PublishRaw(nil, "topic", []byte("{}"), 1, false); err == nil {
+		t.Fatal("PublishRaw(nil) succeeded, want an error")
+	}
+}
+
+func TestPublishRawRejectsWhileReconnecting(t *testing.T) {
+
+	client := &stubClient{connected: true, open: false}
+
+	if err := PublishRaw(client, "topic", []byte("{}"), 1, false); err == nil {
+		t.Fatal("PublishRaw() succeeded while the connection was down")
+	}
+
+	if client.published {
+		t.Fatal("PublishRaw() handed the message to a dead connection")
 	}
 }
