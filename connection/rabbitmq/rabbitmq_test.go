@@ -25,7 +25,7 @@ func TestDialRejectsMissingSettings(t *testing.T) {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			conn, err := Dial(context.Background(), tc.cfg)
+			conn, err := DialWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Dial() succeeded, want an error")
@@ -44,7 +44,7 @@ func TestDialErrorHidesPassword(t *testing.T) {
 
 	const password = "sup3rs3cr3t"
 
-	_, err := Dial(context.Background(), Config{
+	_, err := DialWithContext(context.Background(), Config{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "guest",
@@ -65,7 +65,7 @@ func TestDialErrorHidesPassword(t *testing.T) {
 // get a typed nil back from their connection factory and dereference it.
 func TestDialReturnsErrorNotNilConnection(t *testing.T) {
 
-	conn, err := Dial(context.Background(), Config{
+	conn, err := DialWithContext(context.Background(), Config{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "guest",
@@ -228,7 +228,7 @@ func TestWaitReadyUnblocksOnClose(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- c.WaitReady(context.Background())
+		done <- c.WaitReadyWithContext(context.Background())
 	}()
 
 	time.Sleep(50 * time.Millisecond)
@@ -261,7 +261,7 @@ func TestWaitReadyHonoursContext(t *testing.T) {
 	callerCtx, callerCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer callerCancel()
 
-	if err := c.WaitReady(callerCtx); err == nil {
+	if err := c.WaitReadyWithContext(callerCtx); err == nil {
 		t.Fatal("WaitReady() succeeded, want a context error")
 	}
 }
@@ -323,11 +323,11 @@ func TestConsumeRejectsBadArguments(t *testing.T) {
 
 	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
-	if err := c.Consume(context.Background(), ConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
+	if err := c.ConsumeWithContext(context.Background(), ConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
 		t.Fatal("Consume() with no queue name succeeded")
 	}
 
-	if err := c.Consume(context.Background(), ConsumerConfig{Queue: "q"}, nil); err == nil {
+	if err := c.ConsumeWithContext(context.Background(), ConsumerConfig{Queue: "q"}, nil); err == nil {
 		t.Fatal("Consume() with a nil handler succeeded")
 	}
 }
@@ -339,7 +339,7 @@ func TestPublishRejectsEmptyQueueName(t *testing.T) {
 
 	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
-	if err := c.PublishRaw(context.Background(), "", []byte("{}"), 0); err == nil {
+	if err := c.PublishRawWithContext(context.Background(), "", []byte("{}"), 0); err == nil {
 		t.Fatal("PublishRaw() with an empty queue name succeeded")
 	}
 }
@@ -368,5 +368,92 @@ func TestPublishDoesNotPrefixButConsumeDoes(t *testing.T) {
 	// cross-service target would be rewritten into this service's namespace.
 	if got := strings.ToLower("reports-service.Deposit.create"); c.name(got) == got {
 		t.Fatal("test setup is wrong: prefix should change the consume name")
+	}
+}
+
+func TestPublishBatchRejectsBadArguments(t *testing.T) {
+
+	var missing *Conn
+
+	if err := missing.PublishBatch("q", []any{1}, 0); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("PublishBatch() on a nil Conn = %v, want ErrNotConnected", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+
+	if err := c.PublishBatch("", []any{1}, 0); err == nil {
+		t.Fatal("PublishBatch() with an empty queue name succeeded")
+	}
+
+	if err := c.PublishBatchWithContext(ctx, "q", nil, 0); err != nil {
+		t.Fatalf("PublishBatchWithContext() with no payloads = %v, want nil", err)
+	}
+}
+
+// TestPublishBatchEncodesBeforeSending pins that a bad payload fails the whole
+// batch up front. This Conn has no connection, so reaching the broker would
+// fail with ErrNotConnected instead of the encode error.
+func TestPublishBatchEncodesBeforeSending(t *testing.T) {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+
+	err := c.PublishBatch("q", []any{map[string]int{"n": 1}, make(chan int)}, 0)
+
+	if err == nil || errors.Is(err, ErrNotConnected) {
+		t.Fatalf("PublishBatch() = %v, want an encode error", err)
+	}
+}
+
+// TestPublishFormats pins the wire format of each publisher: the plain forms
+// must match what services sent before adopting this package.
+func TestPublishFormats(t *testing.T) {
+
+	legacy := legacyFormat.publishing([]byte("{}"), 3)
+
+	if legacy.ContentType != LegacyContentType || legacy.DeliveryMode != 0 || !legacy.Timestamp.IsZero() || legacy.Priority != 3 {
+		t.Fatalf("legacy publishing = %+v, want text/plain, no delivery mode, no timestamp, priority 3", legacy)
+	}
+
+	current := jsonFormat.publishing([]byte("{}"), 3)
+
+	if current.ContentType != DefaultContentType || current.DeliveryMode != amqp.Persistent || current.Timestamp.IsZero() || current.Priority != 3 {
+		t.Fatalf("json publishing = %+v, want application/json, persistent, timestamped, priority 3", current)
+	}
+}
+
+func TestPlainVariantsKeepTheContract(t *testing.T) {
+
+	conn, err := Dial(Config{})
+	if err == nil {
+		t.Fatal("Dial() with no settings succeeded")
+	}
+
+	if conn != nil {
+		t.Fatal("Dial() returned a Conn alongside an error")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+
+	if err := c.Consume(ConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
+		t.Fatal("Consume() with no queue name succeeded")
+	}
+
+	if err := c.PublishRaw("", []byte("{}"), 0); err == nil {
+		t.Fatal("PublishRaw() with an empty queue name succeeded")
+	}
+
+	c.Close()
+
+	if err := c.WaitReady(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("WaitReady() after Close = %v, want ErrClosed", err)
 	}
 }
