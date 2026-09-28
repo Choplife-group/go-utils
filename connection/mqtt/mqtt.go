@@ -141,9 +141,16 @@ func ConfigFromEnv() Config {
 }
 
 // ConnectFromEnv connects using the settings read from the environment.
-func ConnectFromEnv(ctx context.Context) (paho.Client, error) {
+func ConnectFromEnv() (paho.Client, error) {
 
-	return Connect(ctx, ConfigFromEnv())
+	return ConnectWithContext(context.Background(), ConfigFromEnv())
+}
+
+// ConnectFromEnvWithContext is ConnectFromEnv with the first connection
+// attempt bound to ctx.
+func ConnectFromEnvWithContext(ctx context.Context) (paho.Client, error) {
+
+	return ConnectWithContext(ctx, ConfigFromEnv())
 }
 
 // Connect validates cfg and establishes a client, waiting up to ConnectTimeout
@@ -152,7 +159,14 @@ func ConnectFromEnv(ctx context.Context) (paho.Client, error) {
 //
 // Once connected, the client redials on its own if the broker goes away, so
 // callers hold on to it for the lifetime of the process.
-func Connect(ctx context.Context, cfg Config) (paho.Client, error) {
+func Connect(cfg Config) (paho.Client, error) {
+
+	return ConnectWithContext(context.Background(), cfg)
+}
+
+// ConnectWithContext is Connect with the first connection attempt bound to
+// ctx as well as ConnectTimeout.
+func ConnectWithContext(ctx context.Context, cfg Config) (paho.Client, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -212,14 +226,58 @@ func Connect(ctx context.Context, cfg Config) (paho.Client, error) {
 // Publish marshals payload as JSON and publishes it to topic at QoS 0. A nil or
 // disconnected client is reported as an error rather than panicking or being
 // silently dropped.
-func Publish(ctx context.Context, client paho.Client, topic string, payload any) error {
+func Publish(client paho.Client, topic string, payload any) error {
 
-	return PublishWithQoS(ctx, client, topic, payload, DefaultQoS, false)
+	return PublishWithQoSWithContext(context.Background(), client, topic, payload, DefaultQoS, false)
+}
+
+// PublishWithContext is Publish bounded by ctx.
+func PublishWithContext(ctx context.Context, client paho.Client, topic string, payload any) error {
+
+	return PublishWithQoSWithContext(ctx, client, topic, payload, DefaultQoS, false)
 }
 
 // PublishWithQoS publishes at an explicit quality of service, optionally
 // retaining the message on the broker.
-func PublishWithQoS(ctx context.Context, client paho.Client, topic string, payload any, qos byte, retained bool) error {
+func PublishWithQoS(client paho.Client, topic string, payload any, qos byte, retained bool) error {
+
+	return PublishWithQoSWithContext(context.Background(), client, topic, payload, qos, retained)
+}
+
+// PublishWithQoSWithContext is PublishWithQoS bounded by ctx.
+func PublishWithQoSWithContext(ctx context.Context, client paho.Client, topic string, payload any, qos byte, retained bool) error {
+
+	if err := checkClient(client); err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("mqtt: encode payload for %s: %w", topic, err)
+	}
+
+	return send(ctx, client, topic, body, qos, retained)
+}
+
+// PublishRaw publishes an already-encoded body as is, for callers that build
+// the message themselves. Passing a string to Publish would JSON-quote it.
+func PublishRaw(client paho.Client, topic string, body []byte, qos byte, retained bool) error {
+
+	return PublishRawWithContext(context.Background(), client, topic, body, qos, retained)
+}
+
+// PublishRawWithContext is PublishRaw bounded by ctx.
+func PublishRawWithContext(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
+
+	if err := checkClient(client); err != nil {
+		return err
+	}
+
+	return send(ctx, client, topic, body, qos, retained)
+}
+
+// checkClient reports a nil or disconnected client.
+func checkClient(client paho.Client) error {
 
 	if client == nil {
 		return fmt.Errorf("mqtt: not initialised")
@@ -234,10 +292,11 @@ func PublishWithQoS(ctx context.Context, client paho.Client, topic string, paylo
 		return fmt.Errorf("mqtt: not connected")
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("mqtt: encode payload for %s: %w", topic, err)
-	}
+	return nil
+}
+
+// send publishes body and waits for the broker to accept it.
+func send(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
 
 	token := client.Publish(topic, qos, retained, body)
 

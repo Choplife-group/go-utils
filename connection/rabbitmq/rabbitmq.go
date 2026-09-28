@@ -174,18 +174,30 @@ type Conn struct {
 }
 
 // DialFromEnv connects using the settings read from the environment.
-func DialFromEnv(ctx context.Context) (*Conn, error) {
+func DialFromEnv() (*Conn, error) {
 
-	return Dial(ctx, ConfigFromEnv())
+	return DialWithContext(context.Background(), ConfigFromEnv())
+}
+
+// DialFromEnvWithContext is DialFromEnv with the Conn's lifetime bound to ctx.
+func DialFromEnvWithContext(ctx context.Context) (*Conn, error) {
+
+	return DialWithContext(ctx, ConfigFromEnv())
 }
 
 // Dial validates cfg and establishes the first connection, returning an error
 // if the broker cannot be reached. It never returns a non-nil Conn alongside an
 // error, and never returns a nil Conn with a nil error.
 //
-// The returned Conn supervises itself until ctx is cancelled or Close is
-// called, so ctx should live as long as the service does.
-func Dial(ctx context.Context, cfg Config) (*Conn, error) {
+// The returned Conn supervises itself until Close is called.
+func Dial(cfg Config) (*Conn, error) {
+
+	return DialWithContext(context.Background(), cfg)
+}
+
+// DialWithContext is Dial with the Conn also stopping when ctx is cancelled,
+// so ctx should live as long as the service does.
+func DialWithContext(ctx context.Context, cfg Config) (*Conn, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -210,7 +222,7 @@ func Dial(ctx context.Context, cfg Config) (*Conn, error) {
 
 	close(c.ready)
 
-	go c.supervise()
+	go c.supervise(amqpConn)
 
 	return c, nil
 }
@@ -238,20 +250,14 @@ func dial(cfg Config) (*amqp.Connection, error) {
 	return conn, nil
 }
 
-// supervise watches the live connection and redials when the broker drops it.
-func (c *Conn) supervise() {
+// supervise watches conn and redials when the broker drops it. It tracks the
+// connection itself rather than reading c.conn, which dropIfDead may already
+// have cleared.
+func (c *Conn) supervise(conn *amqp.Connection) {
 
 	defer recoverPanic(c.ctx, "rabbitmq supervisor")
 
 	for {
-
-		c.mu.RLock()
-		conn := c.conn
-		c.mu.RUnlock()
-
-		if conn == nil {
-			return
-		}
 
 		// The notify channel is buffered so amqp can report the close without
 		// blocking on a receiver that is not there yet.
@@ -276,27 +282,31 @@ func (c *Conn) supervise() {
 
 			c.markDisconnected()
 
-			if !c.redial() {
+			next, ok := c.redial()
+			if !ok {
 				return
 			}
+
+			conn = next
 		}
 	}
 }
 
 // redial retries the connection until it succeeds, the Conn is closed or the
-// supervisor context is cancelled. It reports whether a connection was restored.
-func (c *Conn) redial() bool {
+// supervisor context is cancelled. It returns the restored connection and
+// whether there is one.
+func (c *Conn) redial() (*amqp.Connection, bool) {
 
 	schedule := backoff.Backoff{Min: c.cfg.ReconnectMin, Max: c.cfg.ReconnectMax}
 
 	for {
 
 		if c.isClosed() {
-			return false
+			return nil, false
 		}
 
 		if !schedule.Wait(c.ctx) {
-			return false
+			return nil, false
 		}
 
 		conn, err := dial(c.cfg)
@@ -313,13 +323,13 @@ func (c *Conn) redial() bool {
 		}
 
 		if c.adopt(conn) {
-			return true
+			return conn, true
 		}
 
 		// Close was called while we were dialling.
 		conn.Close()
 
-		return false
+		return nil, false
 	}
 }
 
@@ -363,6 +373,28 @@ func (c *Conn) markDisconnected() {
 	}
 }
 
+// dropIfDead marks the Conn disconnected when the connection it holds has
+// already closed but the supervisor has not caught up yet. Without it, a caller
+// that hit the dead socket would find Ready still closed and retry on the same
+// dead connection instead of waiting for the redial.
+func (c *Conn) dropIfDead() {
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed || c.conn == nil || !c.conn.IsClosed() {
+		return
+	}
+
+	c.conn = nil
+
+	select {
+	case <-c.ready:
+		c.ready = make(chan struct{})
+	default:
+	}
+}
+
 // Channel opens a new AMQP channel on the current connection. It returns
 // ErrNotConnected while a redial is in flight and ErrClosed once the Conn has
 // been closed — never a nil channel with a nil error.
@@ -386,6 +418,14 @@ func (c *Conn) Channel() (*amqp.Channel, error) {
 
 	channel, err := conn.Channel()
 	if err != nil {
+
+		if conn.IsClosed() {
+
+			c.dropIfDead()
+
+			return nil, ErrNotConnected
+		}
+
 		return nil, fmt.Errorf("rabbitmq: open channel: %w", err)
 	}
 
@@ -424,9 +464,14 @@ func (c *Conn) Ready() <-chan struct{} {
 	return c.ready
 }
 
-// WaitReady blocks until the connection is live, ctx is cancelled or the Conn
-// is closed.
-func (c *Conn) WaitReady(ctx context.Context) error {
+// WaitReady blocks until the connection is live or the Conn is closed.
+func (c *Conn) WaitReady() error {
+
+	return c.WaitReadyWithContext(context.Background())
+}
+
+// WaitReadyWithContext is WaitReady that also gives up when ctx is cancelled.
+func (c *Conn) WaitReadyWithContext(ctx context.Context) error {
 
 	if c.isClosed() {
 		return ErrClosed

@@ -144,22 +144,42 @@ func ReportsConfigFromEnv() Config {
 }
 
 // OpenFromEnv opens the service's own database from the DATABASE_* variables.
-func OpenFromEnv(ctx context.Context) (*sql.DB, error) {
+func OpenFromEnv() (*sql.DB, error) {
 
-	return Open(ctx, ConfigFromEnv())
+	return OpenWithContext(context.Background(), ConfigFromEnv())
+}
+
+// OpenFromEnvWithContext is OpenFromEnv with the startup ping bound to ctx.
+func OpenFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
+
+	return OpenWithContext(ctx, ConfigFromEnv())
 }
 
 // OpenReportsFromEnv opens the reports database from the REPORTS_DATABASE_*
 // variables, for the services that write to reports directly.
-func OpenReportsFromEnv(ctx context.Context) (*sql.DB, error) {
+func OpenReportsFromEnv() (*sql.DB, error) {
 
-	return Open(ctx, ReportsConfigFromEnv())
+	return OpenWithContext(context.Background(), ReportsConfigFromEnv())
+}
+
+// OpenReportsFromEnvWithContext is OpenReportsFromEnv with the startup ping
+// bound to ctx.
+func OpenReportsFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
+
+	return OpenWithContext(ctx, ReportsConfigFromEnv())
 }
 
 // Open validates cfg, opens an OpenTelemetry-instrumented pool and verifies it
 // with a ping. It never returns a non-nil pool alongside an error, and never
 // returns a nil pool with a nil error.
-func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
+func Open(cfg Config) (*sql.DB, error) {
+
+	return OpenWithContext(context.Background(), cfg)
+}
+
+// OpenWithContext is Open with the startup ping bound to ctx as well as
+// PingTimeout.
+func OpenWithContext(ctx context.Context, cfg Config) (*sql.DB, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -199,7 +219,13 @@ func Open(ctx context.Context, cfg Config) (*sql.DB, error) {
 
 // Ping checks that a pool is still reachable, and is what a health-check
 // handler should call. A nil pool is reported as an error rather than panicking.
-func Ping(ctx context.Context, db *sql.DB) error {
+func Ping(db *sql.DB) error {
+
+	return PingWithContext(context.Background(), db)
+}
+
+// PingWithContext is Ping bounded by ctx.
+func PingWithContext(ctx context.Context, db *sql.DB) error {
 
 	if db == nil {
 		return fmt.Errorf("database: not initialised")

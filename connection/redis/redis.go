@@ -162,7 +162,13 @@ var (
 // OpenFromEnv returns the service-local cache client, read from the REDIS_*
 // variables and opened on first use. Repeated calls return the same client, so
 // do not Close it.
-func OpenFromEnv(ctx context.Context) (*redis.Client, error) {
+func OpenFromEnv() (*redis.Client, error) {
+
+	return openCached(context.Background(), localRole, ConfigFromEnv())
+}
+
+// OpenFromEnvWithContext is OpenFromEnv with the first-use ping bound to ctx.
+func OpenFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
 
 	return openCached(ctx, localRole, ConfigFromEnv())
 }
@@ -171,7 +177,14 @@ func OpenFromEnv(ctx context.Context) (*redis.Client, error) {
 // GLOBAL_REDIS_* variables. This is the instance identity-service writes tokens
 // into and the one auth middleware must be given — never the local cache.
 // Repeated calls return the same client, so do not Close it.
-func OpenGlobalFromEnv(ctx context.Context) (*redis.Client, error) {
+func OpenGlobalFromEnv() (*redis.Client, error) {
+
+	return openCached(context.Background(), globalRole, GlobalConfigFromEnv())
+}
+
+// OpenGlobalFromEnvWithContext is OpenGlobalFromEnv with the first-use ping
+// bound to ctx.
+func OpenGlobalFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
 
 	return openCached(ctx, globalRole, GlobalConfigFromEnv())
 }
@@ -188,7 +201,7 @@ func openCached(ctx context.Context, key string, cfg Config) (*redis.Client, err
 		return client, nil
 	}
 
-	client, err := Open(ctx, cfg)
+	client, err := OpenWithContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +217,14 @@ func openCached(ctx context.Context, key string, cfg Config) (*redis.Client, err
 //
 // Unlike OpenFromEnv, the client returned here is not cached and is the
 // caller's to Close.
-func Open(ctx context.Context, cfg Config) (*redis.Client, error) {
+func Open(cfg Config) (*redis.Client, error) {
+
+	return OpenWithContext(context.Background(), cfg)
+}
+
+// OpenWithContext is Open with the startup ping bound to ctx as well as
+// PingTimeout.
+func OpenWithContext(ctx context.Context, cfg Config) (*redis.Client, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -248,7 +268,13 @@ func Open(ctx context.Context, cfg Config) (*redis.Client, error) {
 // Ping checks that a client is still reachable, and is what a health-check
 // handler should call. A nil client is reported as an error rather than
 // panicking.
-func Ping(ctx context.Context, client *redis.Client) error {
+func Ping(client *redis.Client) error {
+
+	return PingWithContext(context.Background(), client)
+}
+
+// PingWithContext is Ping bounded by ctx.
+func PingWithContext(ctx context.Context, client *redis.Client) error {
 
 	if client == nil {
 		return fmt.Errorf("redis: not initialised")

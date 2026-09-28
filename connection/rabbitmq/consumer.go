@@ -55,7 +55,7 @@ func (cfg *ConsumerConfig) applyDefaults() {
 }
 
 // Consume declares the queue's topology and delivers messages to handler until
-// ctx is cancelled or the Conn is closed.
+// the Conn is closed.
 //
 // It runs as a loop rather than recursing on reconnect: when the broker drops
 // the connection, it waits for the supervisor to redial, re-declares the
@@ -63,7 +63,14 @@ func (cfg *ConsumerConfig) applyDefaults() {
 // what makes it survive a broker that came back with no topology.
 //
 // Consume blocks, so callers run it in a goroutine — one per queue.
-func (c *Conn) Consume(ctx context.Context, cfg ConsumerConfig, handler Handler) error {
+func (c *Conn) Consume(cfg ConsumerConfig, handler Handler) error {
+
+	return c.ConsumeWithContext(context.Background(), cfg, handler)
+}
+
+// ConsumeWithContext is Consume that also stops when ctx is cancelled. The
+// handler receives ctx, so spans started from it propagate.
+func (c *Conn) ConsumeWithContext(ctx context.Context, cfg ConsumerConfig, handler Handler) error {
 
 	if c == nil {
 		return ErrNotConnected
@@ -112,7 +119,7 @@ func (c *Conn) Consume(ctx context.Context, cfg ConsumerConfig, handler Handler)
 				Error(err.Error())
 		}
 
-		if err := c.WaitReady(ctx); err != nil {
+		if err := c.WaitReadyWithContext(ctx); err != nil {
 			return nil
 		}
 

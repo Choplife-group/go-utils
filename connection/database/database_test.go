@@ -23,7 +23,7 @@ func TestOpenRejectsMissingSettings(t *testing.T) {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			db, err := Open(context.Background(), tc.cfg)
+			db, err := OpenWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Open() succeeded, want an error")
@@ -42,7 +42,7 @@ func TestOpenErrorHidesPassword(t *testing.T) {
 
 	const password = "sup3rs3cr3t"
 
-	db, err := Open(context.Background(), Config{
+	db, err := OpenWithContext(context.Background(), Config{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "root",
@@ -145,7 +145,7 @@ func TestApplyDefaults(t *testing.T) {
 // report a missing pool, not panic on it.
 func TestPingOnNilPoolReturnsError(t *testing.T) {
 
-	if err := Ping(context.Background(), nil); err == nil {
+	if err := PingWithContext(context.Background(), nil); err == nil {
 		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }
@@ -184,5 +184,23 @@ func TestConfigConstructorsStayInSync(t *testing.T) {
 	// not two identically empty structs.
 	if own.Host != "db-host" || own.MaxOpenConns != 21 {
 		t.Fatalf("ConfigFromEnv did not read the environment: %+v", own)
+	}
+}
+
+// TestPlainVariantsKeepTheContract covers the no-ctx forms services call
+// today, which must validate and nil-check exactly like the WithContext forms.
+func TestPlainVariantsKeepTheContract(t *testing.T) {
+
+	db, err := Open(Config{})
+	if err == nil {
+		t.Fatal("Open() with no settings succeeded")
+	}
+
+	if db != nil {
+		t.Fatal("Open() returned a pool alongside an error")
+	}
+
+	if err := Ping(nil); err == nil {
+		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }
