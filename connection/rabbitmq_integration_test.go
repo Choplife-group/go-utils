@@ -1,6 +1,6 @@
 //go:build integration
 
-package rabbitmq
+package connection
 
 import (
 	"context"
@@ -20,15 +20,15 @@ import (
 // green without one. Run them with:
 //
 //	docker run -d --name rabbitmq-it -p 5672:5672 rabbitmq:3-management
-//	go test -tags integration ./connection/rabbitmq/ -v
+//	go test -tags integration ./connection/ -run TestRabbitMQ -v
 
-// testConfig points at the broker described by the environment, defaulting to a
+// rabbitMQTestConfig points at the broker described by the environment, defaulting to a
 // local container.
-func testConfig(t *testing.T) Config {
+func rabbitMQTestConfig(t *testing.T) RabbitMQConfig {
 
 	t.Helper()
 
-	cfg := ConfigFromEnv()
+	cfg := RabbitMQConfigFromEnv()
 
 	if cfg.Host == "" {
 		cfg.Host = "127.0.0.1"
@@ -49,13 +49,13 @@ func testConfig(t *testing.T) Config {
 	return cfg
 }
 
-// TestPublishAndConsume proves the happy path end to end.
-func TestPublishAndConsume(t *testing.T) {
+// TestRabbitMQPublishAndConsume proves the happy path end to end.
+func TestRabbitMQPublishAndConsume(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	conn, err := DialWithContext(ctx, testConfig(t))
+	conn, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -65,7 +65,7 @@ func TestPublishAndConsume(t *testing.T) {
 	queue := fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())
 	received := make(chan string, 1)
 
-	go conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		received <- string(delivery.Body)
 
@@ -91,15 +91,15 @@ func TestPublishAndConsume(t *testing.T) {
 	}
 }
 
-// TestHandlerPanicDoesNotKillTheConsumer covers the failure mode that takes
+// TestRabbitMQHandlerPanicDoesNotKillTheConsumer covers the failure mode that takes
 // services down today: a panic inside a queue goroutine, where Echo's recover
 // middleware cannot reach it.
-func TestHandlerPanicDoesNotKillTheConsumer(t *testing.T) {
+func TestRabbitMQHandlerPanicDoesNotKillTheConsumer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	conn, err := DialWithContext(ctx, testConfig(t))
+	conn, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -110,7 +110,7 @@ func TestHandlerPanicDoesNotKillTheConsumer(t *testing.T) {
 	survived := make(chan string, 1)
 	first := true
 
-	go conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		if first {
 			first = false
@@ -144,9 +144,9 @@ func TestHandlerPanicDoesNotKillTheConsumer(t *testing.T) {
 	}
 }
 
-// TestReconnectAfterBrokerRestart is the test this package exists for. It needs
+// TestRabbitMQReconnectAfterBrokerRestart is the test this package exists for. It needs
 // a container it is allowed to restart, named by RABBITMQ_CONTAINER.
-func TestReconnectAfterBrokerRestart(t *testing.T) {
+func TestRabbitMQReconnectAfterBrokerRestart(t *testing.T) {
 
 	container := os.Getenv("RABBITMQ_CONTAINER")
 	if container == "" {
@@ -156,7 +156,7 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	conn, err := DialWithContext(ctx, testConfig(t))
+	conn, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -166,7 +166,7 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 	queue := fmt.Sprintf("go-utils-it-restart-%d", time.Now().UnixNano())
 	received := make(chan string, 4)
 
-	go conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		received <- string(delivery.Body)
 
@@ -191,11 +191,11 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 
 	// The connection must drop and come back on its own, without the process
 	// exiting and without any caller intervention.
-	if !waitFor(func() bool { return !conn.IsConnected() }, 30*time.Second) {
+	if !waitForRabbitMQ(func() bool { return !conn.IsConnected() }, 30*time.Second) {
 		t.Fatal("connection never registered as dropped")
 	}
 
-	if !waitFor(conn.IsConnected, 60*time.Second) {
+	if !waitForRabbitMQ(conn.IsConnected, 60*time.Second) {
 		t.Fatal("connection never came back")
 	}
 
@@ -219,8 +219,8 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 	}
 }
 
-// waitFor polls condition until it holds or the timeout elapses.
-func waitFor(condition func() bool, timeout time.Duration) bool {
+// waitForRabbitMQ polls condition until it holds or the timeout elapses.
+func waitForRabbitMQ(condition func() bool, timeout time.Duration) bool {
 
 	deadline := time.Now().Add(timeout)
 
@@ -236,14 +236,14 @@ func waitFor(condition func() bool, timeout time.Duration) bool {
 	return false
 }
 
-// TestPublishBatchDeliversInOrder proves a batch arrives complete, in order and
+// TestRabbitMQPublishBatchDeliversInOrder proves a batch arrives complete, in order and
 // in the JSON format the WithContext publishers use.
-func TestPublishBatchDeliversInOrder(t *testing.T) {
+func TestRabbitMQPublishBatchDeliversInOrder(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	conn, err := DialWithContext(ctx, testConfig(t))
+	conn, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -255,7 +255,7 @@ func TestPublishBatchDeliversInOrder(t *testing.T) {
 	queue := fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())
 	received := make(chan amqp.Delivery, total)
 
-	go conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue, PrefetchCount: 50}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue, PrefetchCount: 50}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		received <- delivery
 
@@ -283,8 +283,8 @@ func TestPublishBatchDeliversInOrder(t *testing.T) {
 				t.Fatalf("delivery %d = %s, want %s", i, delivery.Body, want)
 			}
 
-			if delivery.ContentType != DefaultContentType || delivery.DeliveryMode != amqp.Persistent {
-				t.Fatalf("delivery %d content type %q mode %d, want %q persistent", i, delivery.ContentType, delivery.DeliveryMode, DefaultContentType)
+			if delivery.ContentType != DefaultRabbitMQContentType || delivery.DeliveryMode != amqp.Persistent {
+				t.Fatalf("delivery %d content type %q mode %d, want %q persistent", i, delivery.ContentType, delivery.DeliveryMode, DefaultRabbitMQContentType)
 			}
 
 		case <-time.After(10 * time.Second):
@@ -293,12 +293,12 @@ func TestPublishBatchDeliversInOrder(t *testing.T) {
 	}
 }
 
-// TestPlainVariantsKeepTheLegacyWireFormat drives the no-ctx forms end to end
+// TestRabbitMQPlainVariantsKeepTheLegacyWireFormat drives the no-ctx forms end to end
 // and checks Publish and PublishBatch send exactly what services' own
 // publishers did: text/plain and not persistent.
-func TestPlainVariantsKeepTheLegacyWireFormat(t *testing.T) {
+func TestRabbitMQPlainVariantsKeepTheLegacyWireFormat(t *testing.T) {
 
-	conn, err := Dial(testConfig(t))
+	conn, err := DialRabbitMQ(rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestPlainVariantsKeepTheLegacyWireFormat(t *testing.T) {
 	queue := fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())
 	received := make(chan amqp.Delivery, 3)
 
-	go conn.Consume(ConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.Consume(RabbitMQConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		received <- delivery
 
@@ -334,8 +334,8 @@ func TestPlainVariantsKeepTheLegacyWireFormat(t *testing.T) {
 				t.Fatalf("delivery %d = %s, want %s", i, delivery.Body, want)
 			}
 
-			if delivery.ContentType != LegacyContentType || delivery.DeliveryMode == amqp.Persistent {
-				t.Fatalf("delivery %d content type %q mode %d, want %q and not persistent", i, delivery.ContentType, delivery.DeliveryMode, LegacyContentType)
+			if delivery.ContentType != LegacyRabbitMQContentType || delivery.DeliveryMode == amqp.Persistent {
+				t.Fatalf("delivery %d content type %q mode %d, want %q and not persistent", i, delivery.ContentType, delivery.DeliveryMode, LegacyRabbitMQContentType)
 			}
 
 		case <-time.After(10 * time.Second):
@@ -344,25 +344,25 @@ func TestPlainVariantsKeepTheLegacyWireFormat(t *testing.T) {
 	}
 }
 
-// TestFromEnvAndRawPublishForms dials with both environment-driven
+// TestRabbitMQFromEnvAndRawPublishForms dials with both environment-driven
 // constructors and checks each raw publisher's body and wire format.
-func TestFromEnvAndRawPublishForms(t *testing.T) {
+func TestRabbitMQFromEnvAndRawPublishForms(t *testing.T) {
 
-	if ConfigFromEnv().Host == "" {
+	if RabbitMQConfigFromEnv().Host == "" {
 		t.Skip("set RABBITMQ_HOST to run this")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	conn, err := DialFromEnv()
+	conn, err := DialRabbitMQFromEnv()
 	if err != nil {
 		t.Fatalf("DialFromEnv() = %v", err)
 	}
 
 	defer conn.Close()
 
-	withContext, err := DialFromEnvWithContext(ctx)
+	withContext, err := DialRabbitMQFromEnvWithContext(ctx)
 	if err != nil {
 		t.Fatalf("DialFromEnvWithContext() = %v", err)
 	}
@@ -372,7 +372,7 @@ func TestFromEnvAndRawPublishForms(t *testing.T) {
 	queue := fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())
 	received := make(chan amqp.Delivery, 2)
 
-	go conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
+	go conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		received <- delivery
 
@@ -391,7 +391,7 @@ func TestFromEnvAndRawPublishForms(t *testing.T) {
 		t.Fatalf("PublishRawWithContext() = %v", err)
 	}
 
-	want := map[string]string{`{"form":"raw"}`: LegacyContentType, `{"form":"raw-ctx"}`: DefaultContentType}
+	want := map[string]string{`{"form":"raw"}`: LegacyRabbitMQContentType, `{"form":"raw-ctx"}`: DefaultRabbitMQContentType}
 
 	for range 2 {
 
@@ -415,12 +415,12 @@ func TestFromEnvAndRawPublishForms(t *testing.T) {
 	}
 }
 
-// TestConsumeStopsOnCancelOrClose proves ConsumeWithContext returns when its
+// TestRabbitMQConsumeStopsOnCancelOrClose proves ConsumeWithContext returns when its
 // ctx is cancelled and Consume returns when the Conn is closed, so neither
 // leaks a goroutine on shutdown.
-func TestConsumeStopsOnCancelOrClose(t *testing.T) {
+func TestRabbitMQConsumeStopsOnCancelOrClose(t *testing.T) {
 
-	conn, err := Dial(testConfig(t))
+	conn, err := DialRabbitMQ(rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() = %v", err)
 	}
@@ -433,13 +433,13 @@ func TestConsumeStopsOnCancelOrClose(t *testing.T) {
 	cancelled := make(chan error, 1)
 
 	go func() {
-		cancelled <- conn.ConsumeWithContext(ctx, ConsumerConfig{Queue: fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())}, handler)
+		cancelled <- conn.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: fmt.Sprintf("go-utils-it-%d", time.Now().UnixNano())}, handler)
 	}()
 
 	closed := make(chan error, 1)
 
 	go func() {
-		closed <- conn.Consume(ConsumerConfig{Queue: fmt.Sprintf("go-utils-it-%d-b", time.Now().UnixNano())}, handler)
+		closed <- conn.Consume(RabbitMQConsumerConfig{Queue: fmt.Sprintf("go-utils-it-%d-b", time.Now().UnixNano())}, handler)
 	}()
 
 	time.Sleep(2 * time.Second)
@@ -477,25 +477,25 @@ func TestConsumeStopsOnCancelOrClose(t *testing.T) {
 	}
 }
 
-// TestPublishBatchResumesAfterConnectionDrop drops the publisher's socket
+// TestRabbitMQPublishBatchResumesAfterConnectionDrop drops the publisher's socket
 // part-way through a batch and checks the batch resumes from the message that
 // failed: it must finish, reach the last message and send nothing twice.
 //
 // Messages already written to the socket when it dies can be lost, since
 // publishing is unconfirmed; the test logs how many rather than failing on it.
-func TestPublishBatchResumesAfterConnectionDrop(t *testing.T) {
+func TestRabbitMQPublishBatchResumesAfterConnectionDrop(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	publisher, err := DialWithContext(ctx, testConfig(t))
+	publisher, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() publisher = %v", err)
 	}
 
 	defer publisher.Close()
 
-	consumer, err := DialWithContext(ctx, testConfig(t))
+	consumer, err := DialRabbitMQWithContext(ctx, rabbitMQTestConfig(t))
 	if err != nil {
 		t.Fatalf("Dial() consumer = %v", err)
 	}
@@ -513,7 +513,7 @@ func TestPublishBatchResumesAfterConnectionDrop(t *testing.T) {
 		once    sync.Once
 	)
 
-	go consumer.ConsumeWithContext(ctx, ConsumerConfig{Queue: queue, PrefetchCount: 1000}, func(_ context.Context, delivery amqp.Delivery) error {
+	go consumer.ConsumeWithContext(ctx, RabbitMQConsumerConfig{Queue: queue, PrefetchCount: 1000}, func(_ context.Context, delivery amqp.Delivery) error {
 
 		var message struct {
 			N int `json:"n"`

@@ -1,4 +1,4 @@
-package redis
+package connection
 
 import (
 	"context"
@@ -7,21 +7,21 @@ import (
 	"time"
 )
 
-func TestOpenRejectsMissingSettings(t *testing.T) {
+func TestRedisOpenRejectsMissingSettings(t *testing.T) {
 
 	cases := []struct {
 		name string
-		cfg  Config
+		cfg  RedisConfig
 	}{
-		{"no host", Config{Port: "6379"}},
-		{"no port", Config{Host: "localhost"}},
+		{"no host", RedisConfig{Port: "6379"}},
+		{"no port", RedisConfig{Host: "localhost"}},
 	}
 
 	for _, tc := range cases {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			client, err := OpenWithContext(context.Background(), tc.cfg)
+			client, err := OpenRedisWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Open() succeeded, want an error")
@@ -34,9 +34,9 @@ func TestOpenRejectsMissingSettings(t *testing.T) {
 	}
 }
 
-func TestOpenReturnsErrorNotClientWhenUnreachable(t *testing.T) {
+func TestRedisOpenReturnsErrorNotClientWhenUnreachable(t *testing.T) {
 
-	client, err := OpenWithContext(context.Background(), Config{
+	client, err := OpenRedisWithContext(context.Background(), RedisConfig{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		DialTimeout: 500 * time.Millisecond,
@@ -53,14 +53,14 @@ func TestOpenReturnsErrorNotClientWhenUnreachable(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
+func TestRedisConfigFromEnvReadsPlatformNames(t *testing.T) {
 
 	t.Setenv("REDIS_HOST", "cache")
 	t.Setenv("REDIS_PORT", "6379")
 	t.Setenv("REDIS_PASSWORD", "secret")
 	t.Setenv("REDIS_DATABASE_NUMBER", "3")
 
-	cfg := ConfigFromEnv()
+	cfg := RedisConfigFromEnv()
 
 	if cfg.Host != "cache" || cfg.Port != "6379" || cfg.Password != "secret" {
 		t.Fatalf("ConfigFromEnv() = %+v", cfg)
@@ -71,42 +71,42 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	}
 }
 
-// TestGlobalPrefixSelectsTheSharedInstance covers the distinction auth depends
+// TestRedisGlobalPrefixSelectsTheSharedInstance covers the distinction auth depends
 // on: tokens live in the global instance, not the service-local one.
-func TestGlobalPrefixSelectsTheSharedInstance(t *testing.T) {
+func TestRedisGlobalPrefixSelectsTheSharedInstance(t *testing.T) {
 
 	t.Setenv("REDIS_HOST", "local-cache")
 	t.Setenv("GLOBAL_REDIS_HOST", "global-cache")
 	t.Setenv("GLOBAL_REDIS_DATABASE_NUMBER", "2")
 
-	if got := GlobalConfigFromEnv().Host; got != "global-cache" {
+	if got := GlobalRedisConfigFromEnv().Host; got != "global-cache" {
 		t.Fatalf("Host = %q, want %q", got, "global-cache")
 	}
 
-	if got := GlobalConfigFromEnv().DB; got != 2 {
+	if got := GlobalRedisConfigFromEnv().DB; got != 2 {
 		t.Fatalf("DB = %d, want 2", got)
 	}
 
-	if got := ConfigFromEnv().Host; got != "local-cache" {
+	if got := RedisConfigFromEnv().Host; got != "local-cache" {
 		t.Fatalf("Host = %q, want %q", got, "local-cache")
 	}
 }
 
-func TestDefaultDatabaseNumberIsOne(t *testing.T) {
+func TestRedisDefaultDatabaseNumberIsOne(t *testing.T) {
 
 	t.Setenv("REDIS_HOST", "cache")
 	t.Setenv("REDIS_PORT", "6379")
 
-	if got := ConfigFromEnv().DB; got != DefaultDB {
-		t.Fatalf("DB = %d, want %d", got, DefaultDB)
+	if got := RedisConfigFromEnv().DB; got != DefaultRedisDB {
+		t.Fatalf("DB = %d, want %d", got, DefaultRedisDB)
 	}
 }
 
-// TestApplyDefaultsDropsTheCopyPastedPoolSize documents the deliberate change
+// TestRedisApplyDefaultsDropsTheCopyPastedPoolSize documents the deliberate change
 // away from the PoolSize: 1000 every service inherited.
-func TestApplyDefaultsDropsTheCopyPastedPoolSize(t *testing.T) {
+func TestRedisApplyDefaultsDropsTheCopyPastedPoolSize(t *testing.T) {
 
-	cfg := Config{}
+	cfg := RedisConfig{}
 	cfg.applyDefaults()
 
 	want := 10 * runtime.GOMAXPROCS(0)
@@ -120,9 +120,9 @@ func TestApplyDefaultsDropsTheCopyPastedPoolSize(t *testing.T) {
 	}
 }
 
-func TestApplyDefaultsClampsMinIdleToPoolSize(t *testing.T) {
+func TestRedisApplyDefaultsClampsMinIdleToPoolSize(t *testing.T) {
 
-	cfg := Config{PoolSize: 2, MinIdleConns: 50}
+	cfg := RedisConfig{PoolSize: 2, MinIdleConns: 50}
 	cfg.applyDefaults()
 
 	if cfg.MinIdleConns != 2 {
@@ -130,19 +130,19 @@ func TestApplyDefaultsClampsMinIdleToPoolSize(t *testing.T) {
 	}
 }
 
-// TestPingOnNilClientReturnsError is the nil-safety contract for health checks.
-func TestPingOnNilClientReturnsError(t *testing.T) {
+// TestRedisPingOnNilClientReturnsError is the nil-safety contract for health checks.
+func TestRedisPingOnNilClientReturnsError(t *testing.T) {
 
-	if err := PingWithContext(context.Background(), nil); err == nil {
+	if err := PingRedisWithContext(context.Background(), nil); err == nil {
 		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }
 
-// TestConfigConstructorsStayInSync guards the duplication between
+// TestRedisConfigConstructorsStayInSync guards the duplication between
 // ConfigFromEnv and GlobalConfigFromEnv, in the same way the database package
 // guards its own pair: a field added to one and forgotten in the other shows up
 // here as a differing value.
-func TestConfigConstructorsStayInSync(t *testing.T) {
+func TestRedisConfigConstructorsStayInSync(t *testing.T) {
 
 	values := map[string]string{
 		"REDIS_HOST":                 "cache-host",
@@ -159,8 +159,8 @@ func TestConfigConstructorsStayInSync(t *testing.T) {
 		t.Setenv("GLOBAL_"+name, value)
 	}
 
-	own := ConfigFromEnv()
-	global := GlobalConfigFromEnv()
+	own := RedisConfigFromEnv()
+	global := GlobalRedisConfigFromEnv()
 
 	if own != global {
 		t.Fatalf("constructors have drifted apart:\n local  = %+v\n global = %+v", own, global)
@@ -171,11 +171,11 @@ func TestConfigConstructorsStayInSync(t *testing.T) {
 	}
 }
 
-// TestPlainVariantsKeepTheContract covers the no-ctx forms services call
+// TestRedisPlainVariantsKeepTheContract covers the no-ctx forms services call
 // today, which must validate and nil-check exactly like the WithContext forms.
-func TestPlainVariantsKeepTheContract(t *testing.T) {
+func TestRedisPlainVariantsKeepTheContract(t *testing.T) {
 
-	client, err := Open(Config{})
+	client, err := OpenRedis(RedisConfig{})
 	if err == nil {
 		t.Fatal("Open() with no settings succeeded")
 	}
@@ -184,7 +184,7 @@ func TestPlainVariantsKeepTheContract(t *testing.T) {
 		t.Fatal("Open() returned a client alongside an error")
 	}
 
-	if err := Ping(nil); err == nil {
+	if err := PingRedis(nil); err == nil {
 		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }

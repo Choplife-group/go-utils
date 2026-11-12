@@ -1,4 +1,4 @@
-package database
+package connection
 
 import (
 	"context"
@@ -7,23 +7,23 @@ import (
 	"time"
 )
 
-func TestOpenRejectsMissingSettings(t *testing.T) {
+func TestDatabaseOpenRejectsMissingSettings(t *testing.T) {
 
 	cases := []struct {
 		name string
-		cfg  Config
+		cfg  DatabaseConfig
 	}{
-		{"no host", Config{Port: "3306", Username: "root", Name: "identity"}},
-		{"no port", Config{Host: "localhost", Username: "root", Name: "identity"}},
-		{"no username", Config{Host: "localhost", Port: "3306", Name: "identity"}},
-		{"no name", Config{Host: "localhost", Port: "3306", Username: "root"}},
+		{"no host", DatabaseConfig{Port: "3306", Username: "root", Name: "identity"}},
+		{"no port", DatabaseConfig{Host: "localhost", Username: "root", Name: "identity"}},
+		{"no username", DatabaseConfig{Host: "localhost", Port: "3306", Name: "identity"}},
+		{"no name", DatabaseConfig{Host: "localhost", Port: "3306", Username: "root"}},
 	}
 
 	for _, tc := range cases {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			db, err := OpenWithContext(context.Background(), tc.cfg)
+			db, err := OpenDatabaseWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Open() succeeded, want an error")
@@ -38,11 +38,11 @@ func TestOpenRejectsMissingSettings(t *testing.T) {
 	}
 }
 
-func TestOpenErrorHidesPassword(t *testing.T) {
+func TestDatabaseOpenErrorHidesPassword(t *testing.T) {
 
 	const password = "sup3rs3cr3t"
 
-	db, err := OpenWithContext(context.Background(), Config{
+	db, err := OpenDatabaseWithContext(context.Background(), DatabaseConfig{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "root",
@@ -65,9 +65,9 @@ func TestOpenErrorHidesPassword(t *testing.T) {
 	}
 }
 
-func TestDSNMatchesPlatformParameters(t *testing.T) {
+func TestDatabaseDSNMatchesPlatformParameters(t *testing.T) {
 
-	cfg := Config{Host: "db", Port: "3306", Username: "root", Password: "secret", Name: "identity"}
+	cfg := DatabaseConfig{Host: "db", Port: "3306", Username: "root", Password: "secret", Name: "identity"}
 
 	want := "root:secret@tcp(db:3306)/identity?charset=utf8&parseTime=True&multiStatements=true"
 
@@ -76,7 +76,7 @@ func TestDSNMatchesPlatformParameters(t *testing.T) {
 	}
 }
 
-func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
+func TestDatabaseConfigFromEnvReadsPlatformNames(t *testing.T) {
 
 	t.Setenv("DATABASE_HOST", "db")
 	t.Setenv("DATABASE_PORT", "3306")
@@ -87,7 +87,7 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	t.Setenv("DATABASE_MAX_CONNECTION", "21")
 	t.Setenv("DATABASE_CONNECTION_LIFETIME", "120")
 
-	cfg := ConfigFromEnv()
+	cfg := DatabaseConfigFromEnv()
 
 	if cfg.Host != "db" || cfg.Name != "identity" {
 		t.Fatalf("ConfigFromEnv() = %+v", cfg)
@@ -102,60 +102,60 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	}
 }
 
-// TestConfigFromEnvPrefixSelectsSecondDatabase covers the rewards-service shape,
+// TestDatabaseConfigFromEnvPrefixSelectsSecondDatabase covers the rewards-service shape,
 // where a reports database sits behind its own prefix.
-func TestConfigFromEnvPrefixSelectsSecondDatabase(t *testing.T) {
+func TestDatabaseConfigFromEnvPrefixSelectsSecondDatabase(t *testing.T) {
 
 	t.Setenv("DATABASE_HOST", "primary")
 	t.Setenv("REPORTS_DATABASE_HOST", "reports")
 	t.Setenv("REPORTS_DATABASE_NAME", "reports")
 
-	if got := ReportsConfigFromEnv().Host; got != "reports" {
+	if got := ReportsDatabaseConfigFromEnv().Host; got != "reports" {
 		t.Fatalf("Host = %q, want %q", got, "reports")
 	}
 
-	if got := ConfigFromEnv().Host; got != "primary" {
+	if got := DatabaseConfigFromEnv().Host; got != "primary" {
 		t.Fatalf("Host = %q, want %q", got, "primary")
 	}
 }
 
-func TestApplyDefaults(t *testing.T) {
+func TestDatabaseApplyDefaults(t *testing.T) {
 
-	cfg := Config{}
+	cfg := DatabaseConfig{}
 	cfg.applyDefaults()
 
-	if cfg.MaxIdleConns != DefaultMaxIdleConns {
-		t.Errorf("MaxIdleConns = %d, want %d", cfg.MaxIdleConns, DefaultMaxIdleConns)
+	if cfg.MaxIdleConns != DefaultDatabaseMaxIdleConns {
+		t.Errorf("MaxIdleConns = %d, want %d", cfg.MaxIdleConns, DefaultDatabaseMaxIdleConns)
 	}
 
-	if cfg.MaxOpenConns != DefaultMaxOpenConns {
-		t.Errorf("MaxOpenConns = %d, want %d", cfg.MaxOpenConns, DefaultMaxOpenConns)
+	if cfg.MaxOpenConns != DefaultDatabaseMaxOpenConns {
+		t.Errorf("MaxOpenConns = %d, want %d", cfg.MaxOpenConns, DefaultDatabaseMaxOpenConns)
 	}
 
-	if cfg.ConnMaxLifetime != DefaultConnMaxLifetime {
-		t.Errorf("ConnMaxLifetime = %s, want %s", cfg.ConnMaxLifetime, DefaultConnMaxLifetime)
+	if cfg.ConnMaxLifetime != DefaultDatabaseConnMaxLifetime {
+		t.Errorf("ConnMaxLifetime = %s, want %s", cfg.ConnMaxLifetime, DefaultDatabaseConnMaxLifetime)
 	}
 
-	if cfg.PingTimeout != DefaultPingTimeout {
-		t.Errorf("PingTimeout = %s, want %s", cfg.PingTimeout, DefaultPingTimeout)
+	if cfg.PingTimeout != DefaultDatabasePingTimeout {
+		t.Errorf("PingTimeout = %s, want %s", cfg.PingTimeout, DefaultDatabasePingTimeout)
 	}
 }
 
-// TestPingOnNilPoolReturnsError is the nil-safety contract: a health check must
+// TestDatabasePingOnNilPoolReturnsError is the nil-safety contract: a health check must
 // report a missing pool, not panic on it.
-func TestPingOnNilPoolReturnsError(t *testing.T) {
+func TestDatabasePingOnNilPoolReturnsError(t *testing.T) {
 
-	if err := PingWithContext(context.Background(), nil); err == nil {
+	if err := PingDatabaseWithContext(context.Background(), nil); err == nil {
 		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }
 
-// TestConfigConstructorsStayInSync guards the duplication between
+// TestDatabaseConfigConstructorsStayInSync guards the duplication between
 // ConfigFromEnv and ReportsConfigFromEnv. Both are spelled out variable by
 // variable so every name is greppable, which means a field added to one can be
 // forgotten in the other. Setting every variable to the same value under both
 // prefixes makes any such omission show up as a differing field.
-func TestConfigConstructorsStayInSync(t *testing.T) {
+func TestDatabaseConfigConstructorsStayInSync(t *testing.T) {
 
 	values := map[string]string{
 		"DATABASE_HOST":                "db-host",
@@ -173,8 +173,8 @@ func TestConfigConstructorsStayInSync(t *testing.T) {
 		t.Setenv("REPORTS_"+name, value)
 	}
 
-	own := ConfigFromEnv()
-	reports := ReportsConfigFromEnv()
+	own := DatabaseConfigFromEnv()
+	reports := ReportsDatabaseConfigFromEnv()
 
 	if own != reports {
 		t.Fatalf("constructors have drifted apart:\n own     = %+v\n reports = %+v", own, reports)
@@ -187,11 +187,11 @@ func TestConfigConstructorsStayInSync(t *testing.T) {
 	}
 }
 
-// TestPlainVariantsKeepTheContract covers the no-ctx forms services call
+// TestDatabasePlainVariantsKeepTheContract covers the no-ctx forms services call
 // today, which must validate and nil-check exactly like the WithContext forms.
-func TestPlainVariantsKeepTheContract(t *testing.T) {
+func TestDatabasePlainVariantsKeepTheContract(t *testing.T) {
 
-	db, err := Open(Config{})
+	db, err := OpenDatabase(DatabaseConfig{})
 	if err == nil {
 		t.Fatal("Open() with no settings succeeded")
 	}
@@ -200,7 +200,7 @@ func TestPlainVariantsKeepTheContract(t *testing.T) {
 		t.Fatal("Open() returned a pool alongside an error")
 	}
 
-	if err := Ping(nil); err == nil {
+	if err := PingDatabase(nil); err == nil {
 		t.Fatal("Ping(nil) succeeded, want an error")
 	}
 }

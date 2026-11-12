@@ -1,4 +1,4 @@
-// Package database opens instrumented MySQL connection pools.
+// OpenDatabase opens instrumented MySQL connection pools.
 //
 // Settings are read from the environment. The service's own database reads:
 //
@@ -12,12 +12,14 @@
 //	DATABASE_CONNECTION_LIFETIME  (optional) connection lifetime in seconds, default 60
 //
 // The reports database reads the same names behind a REPORTS_ prefix — spelled
-// out in full by ReportsConfigFromEnv — and is opened with OpenReportsFromEnv.
+// out in full by ReportsDatabaseConfigFromEnv — and is opened with
+// OpenReportsDatabaseFromEnv.
 //
-// Open validates its settings and pings the server before returning, so a
+// OpenDatabase validates its settings and pings the server before returning, so a
 // misconfigured or unreachable database surfaces as an error at startup rather
 // than as a nil pool that panics on first use. Nothing here logs the DSN.
-package database
+
+package connection
 
 import (
 	"context"
@@ -34,16 +36,16 @@ import (
 
 // Default pool settings, matching the values services have been using.
 const (
-	DefaultMaxIdleConns    = 5
-	DefaultMaxOpenConns    = 10
-	DefaultConnMaxLifetime = 60 * time.Second
-	DefaultPingTimeout     = 5 * time.Second
+	DefaultDatabaseMaxIdleConns    = 5
+	DefaultDatabaseMaxOpenConns    = 10
+	DefaultDatabaseConnMaxLifetime = 60 * time.Second
+	DefaultDatabasePingTimeout     = 5 * time.Second
 )
 
-// Config describes a MySQL connection pool. The zero value is not usable —
+// DatabaseConfig describes a MySQL connection pool. The zero value is not usable —
 // Host, Port, Username and Name are required — but every other field has a
-// default applied by Open.
-type Config struct {
+// default applied by OpenDatabase.
+type DatabaseConfig struct {
 	Host     string
 	Port     string
 	Username string
@@ -55,23 +57,23 @@ type Config struct {
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
 
-	// PingTimeout bounds the connectivity check Open performs.
+	// PingTimeout bounds the connectivity check OpenDatabase performs.
 	PingTimeout time.Duration
 }
 
 // applyDefaults fills in fields left at their zero value.
-func (c *Config) applyDefaults() {
+func (c *DatabaseConfig) applyDefaults() {
 
 	if c.MaxIdleConns <= 0 {
-		c.MaxIdleConns = DefaultMaxIdleConns
+		c.MaxIdleConns = DefaultDatabaseMaxIdleConns
 	}
 
 	if c.MaxOpenConns <= 0 {
-		c.MaxOpenConns = DefaultMaxOpenConns
+		c.MaxOpenConns = DefaultDatabaseMaxOpenConns
 	}
 
 	if c.ConnMaxLifetime <= 0 {
-		c.ConnMaxLifetime = DefaultConnMaxLifetime
+		c.ConnMaxLifetime = DefaultDatabaseConnMaxLifetime
 	}
 
 	if c.ConnMaxIdleTime <= 0 {
@@ -79,12 +81,12 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.PingTimeout <= 0 {
-		c.PingTimeout = DefaultPingTimeout
+		c.PingTimeout = DefaultDatabasePingTimeout
 	}
 }
 
 // validate reports the first required field that is missing.
-func (c *Config) validate() error {
+func (c *DatabaseConfig) validate() error {
 
 	switch {
 	case c.Host == "":
@@ -102,7 +104,7 @@ func (c *Config) validate() error {
 
 // dsn builds the MySQL connection string. The parameters match what the
 // platform's services have always used, so behaviour is unchanged.
-func (c *Config) dsn() string {
+func (c *DatabaseConfig) dsn() string {
 
 	return fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8&parseTime=True&multiStatements=true",
@@ -110,76 +112,77 @@ func (c *Config) dsn() string {
 	)
 }
 
-// ConfigFromEnv reads the service's own database settings from the DATABASE_*
+// DatabaseConfigFromEnv reads the service's own database settings from the DATABASE_*
 // variables.
-func ConfigFromEnv() Config {
+func DatabaseConfigFromEnv() DatabaseConfig {
 
-	return Config{
+	return DatabaseConfig{
 		Host:            env.String("DATABASE_HOST", ""),
 		Port:            env.String("DATABASE_PORT", ""),
 		Username:        env.String("DATABASE_USERNAME", ""),
 		Password:        env.String("DATABASE_PASSWORD", ""),
 		Name:            env.String("DATABASE_NAME", ""),
-		MaxIdleConns:    env.Int("DATABASE_IDLE_CONNECTION", DefaultMaxIdleConns),
-		MaxOpenConns:    env.Int("DATABASE_MAX_CONNECTION", DefaultMaxOpenConns),
-		ConnMaxLifetime: env.Seconds("DATABASE_CONNECTION_LIFETIME", DefaultConnMaxLifetime),
+		MaxIdleConns:    env.Int("DATABASE_IDLE_CONNECTION", DefaultDatabaseMaxIdleConns),
+		MaxOpenConns:    env.Int("DATABASE_MAX_CONNECTION", DefaultDatabaseMaxOpenConns),
+		ConnMaxLifetime: env.Seconds("DATABASE_CONNECTION_LIFETIME", DefaultDatabaseConnMaxLifetime),
 	}
 }
 
-// ReportsConfigFromEnv reads the reports database settings from the
-// REPORTS_DATABASE_* variables. It mirrors ConfigFromEnv field for field, and
-// TestConfigConstructorsStayInSync fails if the two ever drift apart.
-func ReportsConfigFromEnv() Config {
+// ReportsDatabaseConfigFromEnv reads the reports database settings from the
+// REPORTS_DATABASE_* variables. It mirrors DatabaseConfigFromEnv field for field, and
+// TestDatabaseConfigConstructorsStayInSync fails if the two ever drift apart.
+func ReportsDatabaseConfigFromEnv() DatabaseConfig {
 
-	return Config{
+	return DatabaseConfig{
 		Host:            env.String("REPORTS_DATABASE_HOST", ""),
 		Port:            env.String("REPORTS_DATABASE_PORT", ""),
 		Username:        env.String("REPORTS_DATABASE_USERNAME", ""),
 		Password:        env.String("REPORTS_DATABASE_PASSWORD", ""),
 		Name:            env.String("REPORTS_DATABASE_NAME", ""),
-		MaxIdleConns:    env.Int("REPORTS_DATABASE_IDLE_CONNECTION", DefaultMaxIdleConns),
-		MaxOpenConns:    env.Int("REPORTS_DATABASE_MAX_CONNECTION", DefaultMaxOpenConns),
-		ConnMaxLifetime: env.Seconds("REPORTS_DATABASE_CONNECTION_LIFETIME", DefaultConnMaxLifetime),
+		MaxIdleConns:    env.Int("REPORTS_DATABASE_IDLE_CONNECTION", DefaultDatabaseMaxIdleConns),
+		MaxOpenConns:    env.Int("REPORTS_DATABASE_MAX_CONNECTION", DefaultDatabaseMaxOpenConns),
+		ConnMaxLifetime: env.Seconds("REPORTS_DATABASE_CONNECTION_LIFETIME", DefaultDatabaseConnMaxLifetime),
 	}
 }
 
-// OpenFromEnv opens the service's own database from the DATABASE_* variables.
-func OpenFromEnv() (*sql.DB, error) {
+// OpenDatabaseFromEnv opens the service's own database from the DATABASE_* variables.
+func OpenDatabaseFromEnv() (*sql.DB, error) {
 
-	return OpenWithContext(context.Background(), ConfigFromEnv())
+	return OpenDatabaseWithContext(context.Background(), DatabaseConfigFromEnv())
 }
 
-// OpenFromEnvWithContext is OpenFromEnv with the startup ping bound to ctx.
-func OpenFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
-
-	return OpenWithContext(ctx, ConfigFromEnv())
-}
-
-// OpenReportsFromEnv opens the reports database from the REPORTS_DATABASE_*
-// variables, for the services that write to reports directly.
-func OpenReportsFromEnv() (*sql.DB, error) {
-
-	return OpenWithContext(context.Background(), ReportsConfigFromEnv())
-}
-
-// OpenReportsFromEnvWithContext is OpenReportsFromEnv with the startup ping
+// OpenDatabaseFromEnvWithContext is OpenDatabaseFromEnv with the startup ping
 // bound to ctx.
-func OpenReportsFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
+func OpenDatabaseFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
 
-	return OpenWithContext(ctx, ReportsConfigFromEnv())
+	return OpenDatabaseWithContext(ctx, DatabaseConfigFromEnv())
 }
 
-// Open validates cfg, opens an OpenTelemetry-instrumented pool and verifies it
+// OpenReportsDatabaseFromEnv opens the reports database from the REPORTS_DATABASE_*
+// variables, for the services that write to reports directly.
+func OpenReportsDatabaseFromEnv() (*sql.DB, error) {
+
+	return OpenDatabaseWithContext(context.Background(), ReportsDatabaseConfigFromEnv())
+}
+
+// OpenReportsDatabaseFromEnvWithContext is OpenReportsDatabaseFromEnv with the
+// startup ping bound to ctx.
+func OpenReportsDatabaseFromEnvWithContext(ctx context.Context) (*sql.DB, error) {
+
+	return OpenDatabaseWithContext(ctx, ReportsDatabaseConfigFromEnv())
+}
+
+// OpenDatabase validates cfg, opens an OpenTelemetry-instrumented pool and verifies it
 // with a ping. It never returns a non-nil pool alongside an error, and never
 // returns a nil pool with a nil error.
-func Open(cfg Config) (*sql.DB, error) {
+func OpenDatabase(cfg DatabaseConfig) (*sql.DB, error) {
 
-	return OpenWithContext(context.Background(), cfg)
+	return OpenDatabaseWithContext(context.Background(), cfg)
 }
 
-// OpenWithContext is Open with the startup ping bound to ctx as well as
-// PingTimeout.
-func OpenWithContext(ctx context.Context, cfg Config) (*sql.DB, error) {
+// OpenDatabaseWithContext is OpenDatabase with the startup ping bound to ctx as
+// well as PingTimeout.
+func OpenDatabaseWithContext(ctx context.Context, cfg DatabaseConfig) (*sql.DB, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -217,15 +220,15 @@ func OpenWithContext(ctx context.Context, cfg Config) (*sql.DB, error) {
 	return db, nil
 }
 
-// Ping checks that a pool is still reachable, and is what a health-check
+// PingDatabase checks that a pool is still reachable, and is what a health-check
 // handler should call. A nil pool is reported as an error rather than panicking.
-func Ping(db *sql.DB) error {
+func PingDatabase(db *sql.DB) error {
 
-	return PingWithContext(context.Background(), db)
+	return PingDatabaseWithContext(context.Background(), db)
 }
 
-// PingWithContext is Ping bounded by ctx.
-func PingWithContext(ctx context.Context, db *sql.DB) error {
+// PingDatabaseWithContext is PingDatabase bounded by ctx.
+func PingDatabaseWithContext(ctx context.Context, db *sql.DB) error {
 
 	if db == nil {
 		return fmt.Errorf("database: not initialised")
