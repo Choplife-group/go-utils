@@ -1,6 +1,6 @@
 //go:build integration
 
-package database
+package connection
 
 import (
 	"context"
@@ -15,11 +15,11 @@ import (
 //	docker run -d --name mysql-it -p 3307:3306 -e MYSQL_ROOT_PASSWORD=secret -e MYSQL_DATABASE=identity mysql:8
 //	DATABASE_HOST=127.0.0.1 DATABASE_PORT=3307 DATABASE_USERNAME=root \
 //	DATABASE_PASSWORD=secret DATABASE_NAME=identity \
-//	go test -tags integration ./connection/database/ -v
+//	go test -tags integration ./connection/ -run TestDatabase -v
 
-func TestOpenAgainstLiveServer(t *testing.T) {
+func TestDatabaseOpenAgainstLiveServer(t *testing.T) {
 
-	cfg := ConfigFromEnv()
+	cfg := DatabaseConfigFromEnv()
 
 	if cfg.Host == "" {
 		t.Skip("set DATABASE_HOST to run this")
@@ -28,14 +28,14 @@ func TestOpenAgainstLiveServer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	db, err := OpenWithContext(ctx, cfg)
+	db, err := OpenDatabaseWithContext(ctx, cfg)
 	if err != nil {
 		t.Fatalf("Open() = %v", err)
 	}
 
 	defer db.Close()
 
-	if err := PingWithContext(ctx, db); err != nil {
+	if err := PingDatabaseWithContext(ctx, db); err != nil {
 		t.Fatalf("Ping() = %v", err)
 	}
 
@@ -58,32 +58,32 @@ func TestOpenAgainstLiveServer(t *testing.T) {
 	}
 }
 
-func TestOpenWithoutContextAgainstLiveServer(t *testing.T) {
+func TestDatabaseOpenWithoutContextAgainstLiveServer(t *testing.T) {
 
-	cfg := ConfigFromEnv()
+	cfg := DatabaseConfigFromEnv()
 
 	if cfg.Host == "" {
 		t.Skip("set DATABASE_HOST to run this")
 	}
 
-	db, err := Open(cfg)
+	db, err := OpenDatabase(cfg)
 	if err != nil {
 		t.Fatalf("Open() = %v", err)
 	}
 
 	defer db.Close()
 
-	if err := Ping(db); err != nil {
+	if err := PingDatabase(db); err != nil {
 		t.Fatalf("Ping() = %v", err)
 	}
 }
 
-// TestFromEnvConstructorsAgainstLiveServer opens every environment-driven
+// TestDatabaseFromEnvConstructorsAgainstLiveServer opens every environment-driven
 // constructor in both forms. The reports settings are pointed at the same
 // server, since the test stack has one.
-func TestFromEnvConstructorsAgainstLiveServer(t *testing.T) {
+func TestDatabaseFromEnvConstructorsAgainstLiveServer(t *testing.T) {
 
-	if ConfigFromEnv().Host == "" {
+	if DatabaseConfigFromEnv().Host == "" {
 		t.Skip("set DATABASE_HOST to run this")
 	}
 
@@ -95,10 +95,10 @@ func TestFromEnvConstructorsAgainstLiveServer(t *testing.T) {
 	defer cancel()
 
 	constructors := map[string]func() (*sql.DB, error){
-		"OpenFromEnv":                   OpenFromEnv,
-		"OpenFromEnvWithContext":        func() (*sql.DB, error) { return OpenFromEnvWithContext(ctx) },
-		"OpenReportsFromEnv":            OpenReportsFromEnv,
-		"OpenReportsFromEnvWithContext": func() (*sql.DB, error) { return OpenReportsFromEnvWithContext(ctx) },
+		"OpenFromEnv":                   OpenDatabaseFromEnv,
+		"OpenFromEnvWithContext":        func() (*sql.DB, error) { return OpenDatabaseFromEnvWithContext(ctx) },
+		"OpenReportsFromEnv":            OpenReportsDatabaseFromEnv,
+		"OpenReportsFromEnvWithContext": func() (*sql.DB, error) { return OpenReportsDatabaseFromEnvWithContext(ctx) },
 	}
 
 	for name, open := range constructors {
@@ -108,7 +108,7 @@ func TestFromEnvConstructorsAgainstLiveServer(t *testing.T) {
 			t.Fatalf("%s() = %v", name, err)
 		}
 
-		if err := Ping(db); err != nil {
+		if err := PingDatabase(db); err != nil {
 			t.Fatalf("%s(): Ping() = %v", name, err)
 		}
 

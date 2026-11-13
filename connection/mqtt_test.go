@@ -1,4 +1,4 @@
-package mqtt
+package connection
 
 import (
 	"context"
@@ -8,21 +8,21 @@ import (
 	paho "github.com/eclipse/paho.mqtt.golang"
 )
 
-func TestConnectRejectsMissingSettings(t *testing.T) {
+func TestMQTTConnectRejectsMissingSettings(t *testing.T) {
 
 	cases := []struct {
 		name string
-		cfg  Config
+		cfg  MQTTConfig
 	}{
-		{"no host", Config{Port: "1883"}},
-		{"no port", Config{Host: "localhost"}},
+		{"no host", MQTTConfig{Port: "1883"}},
+		{"no port", MQTTConfig{Host: "localhost"}},
 	}
 
 	for _, tc := range cases {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			client, err := ConnectWithContext(context.Background(), tc.cfg)
+			client, err := ConnectMQTTWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Connect() succeeded, want an error")
@@ -35,9 +35,9 @@ func TestConnectRejectsMissingSettings(t *testing.T) {
 	}
 }
 
-func TestConnectReturnsErrorNotClientWhenUnreachable(t *testing.T) {
+func TestMQTTConnectReturnsErrorNotClientWhenUnreachable(t *testing.T) {
 
-	client, err := ConnectWithContext(context.Background(), Config{
+	client, err := ConnectMQTTWithContext(context.Background(), MQTTConfig{
 		Host:           "127.0.0.1",
 		Port:           "1",
 		ConnectTimeout: 500 * time.Millisecond,
@@ -53,23 +53,23 @@ func TestConnectReturnsErrorNotClientWhenUnreachable(t *testing.T) {
 	}
 }
 
-func TestBrokerURI(t *testing.T) {
+func TestMQTTBrokerURI(t *testing.T) {
 
-	cfg := Config{Host: "emqx", Port: "1883"}
+	cfg := MQTTConfig{Host: "emqx", Port: "1883"}
 	cfg.applyDefaults()
 
 	if got := cfg.broker(); got != "tcp://emqx:1883" {
 		t.Fatalf("broker() = %s, want tcp://emqx:1883", got)
 	}
 
-	tls := Config{Host: "emqx", Port: "8883", Scheme: "ssl"}
+	tls := MQTTConfig{Host: "emqx", Port: "8883", Scheme: "ssl"}
 
 	if got := tls.broker(); got != "ssl://emqx:8883" {
 		t.Fatalf("broker() = %s, want ssl://emqx:8883", got)
 	}
 }
 
-func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
+func TestMQTTConfigFromEnvReadsPlatformNames(t *testing.T) {
 
 	t.Setenv("MQTT_HOST", "emqx")
 	t.Setenv("MQTT_PORT", "1883")
@@ -77,7 +77,7 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	t.Setenv("MQTT_PASSWORD", "pass")
 	t.Setenv("CLIENT_ID", "identity")
 
-	cfg := ConfigFromEnv()
+	cfg := MQTTConfigFromEnv()
 
 	if cfg.Host != "emqx" || cfg.Port != "1883" {
 		t.Fatalf("ConfigFromEnv() = %+v", cfg)
@@ -88,11 +88,11 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	}
 }
 
-func TestClientIDPrefixFallsBackToServiceName(t *testing.T) {
+func TestMQTTClientIDPrefixFallsBackToServiceName(t *testing.T) {
 
 	t.Setenv("OTEL_SERVICE_NAME", "wallet-service")
 
-	cfg := Config{Host: "emqx", Port: "1883"}
+	cfg := MQTTConfig{Host: "emqx", Port: "1883"}
 	cfg.applyDefaults()
 
 	if cfg.ClientIDPrefix != "wallet-service" {
@@ -100,20 +100,20 @@ func TestClientIDPrefixFallsBackToServiceName(t *testing.T) {
 	}
 }
 
-// TestPublishOnNilClientReturnsError is the nil-safety contract: every service
+// TestMQTTPublishOnNilClientReturnsError is the nil-safety contract: every service
 // this replaces returns *mqtt.Client and guards nil at each call site instead.
-func TestPublishOnNilClientReturnsError(t *testing.T) {
+func TestMQTTPublishOnNilClientReturnsError(t *testing.T) {
 
-	if err := PublishWithContext(context.Background(), nil, "topic", map[string]string{"a": "b"}); err == nil {
+	if err := PublishMQTTWithContext(context.Background(), nil, "topic", map[string]string{"a": "b"}); err == nil {
 		t.Fatal("Publish(nil) succeeded, want an error")
 	}
 }
 
-func TestPublishRejectsUnencodablePayload(t *testing.T) {
+func TestMQTTPublishRejectsUnencodablePayload(t *testing.T) {
 
 	// A disconnected client is rejected before encoding, so this exercises the
 	// nil-client path only; encoding is covered by the marshal error branch.
-	if err := PublishWithContext(context.Background(), nil, "topic", make(chan int)); err == nil {
+	if err := PublishMQTTWithContext(context.Background(), nil, "topic", make(chan int)); err == nil {
 		t.Fatal("Publish() succeeded, want an error")
 	}
 }
@@ -140,15 +140,15 @@ func (s *stubClient) Publish(string, byte, bool, interface{}) paho.Token {
 	return nil
 }
 
-// TestPublishRejectsWhileReconnecting pins the distinction that broke the
+// TestMQTTPublishRejectsWhileReconnecting pins the distinction that broke the
 // reconnect test: paho's IsConnected stays true for the whole outage when
 // auto-reconnect is on, so Publish must gate on IsConnectionOpen or it will
 // hand messages to a dead socket.
-func TestPublishRejectsWhileReconnecting(t *testing.T) {
+func TestMQTTPublishRejectsWhileReconnecting(t *testing.T) {
 
 	client := &stubClient{connected: true, open: false}
 
-	err := PublishWithContext(context.Background(), client, "topic", map[string]string{"a": "b"})
+	err := PublishMQTTWithContext(context.Background(), client, "topic", map[string]string{"a": "b"})
 
 	if err == nil {
 		t.Fatal("Publish() succeeded while the connection was down")
@@ -159,9 +159,9 @@ func TestPublishRejectsWhileReconnecting(t *testing.T) {
 	}
 }
 
-func TestPlainVariantsKeepTheContract(t *testing.T) {
+func TestMQTTPlainVariantsKeepTheContract(t *testing.T) {
 
-	client, err := Connect(Config{})
+	client, err := ConnectMQTT(MQTTConfig{})
 	if err == nil {
 		t.Fatal("Connect() with no settings succeeded")
 	}
@@ -170,20 +170,20 @@ func TestPlainVariantsKeepTheContract(t *testing.T) {
 		t.Fatal("Connect() returned a client alongside an error")
 	}
 
-	if err := Publish(nil, "topic", map[string]string{"a": "b"}); err == nil {
+	if err := PublishMQTT(nil, "topic", map[string]string{"a": "b"}); err == nil {
 		t.Fatal("Publish(nil) succeeded, want an error")
 	}
 
-	if err := PublishRaw(nil, "topic", []byte("{}"), 1, false); err == nil {
+	if err := PublishMQTTRaw(nil, "topic", []byte("{}"), 1, false); err == nil {
 		t.Fatal("PublishRaw(nil) succeeded, want an error")
 	}
 }
 
-func TestPublishRawRejectsWhileReconnecting(t *testing.T) {
+func TestMQTTPublishRawRejectsWhileReconnecting(t *testing.T) {
 
 	client := &stubClient{connected: true, open: false}
 
-	if err := PublishRaw(client, "topic", []byte("{}"), 1, false); err == nil {
+	if err := PublishMQTTRaw(client, "topic", []byte("{}"), 1, false); err == nil {
 		t.Fatal("PublishRaw() succeeded while the connection was down")
 	}
 

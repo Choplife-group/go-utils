@@ -1,4 +1,4 @@
-// Package mqtt opens MQTT clients for real-time publishing to EMQX.
+// ConnectMQTT opens MQTT clients for real-time publishing to EMQX.
 //
 // Settings are read from the environment:
 //
@@ -13,10 +13,11 @@
 //	MQTT_MAX_RECONNECT_INTERVAL (optional) reconnect ceiling in seconds, default 30
 //
 // Reconnection is handled by the paho client, which redials on its own with a
-// bounded interval. Connect returns the mqtt.Client interface by value; the
+// bounded interval. ConnectMQTT returns the paho.Client interface by value; the
 // services this replaces returned *mqtt.Client, a pointer to an interface, which
 // is why their publish paths are littered with nil checks.
-package mqtt
+
+package connection
 
 import (
 	"context"
@@ -32,18 +33,18 @@ import (
 
 // Default client settings.
 const (
-	DefaultScheme                    = "tcp"
-	DefaultKeepAlive                 = 120 * time.Second
-	DefaultConnectTimeout            = 10 * time.Second
-	DefaultMaxReconnectInterval      = 30 * time.Second
-	DefaultConnectRetryInterval      = 2 * time.Second
-	DefaultPublishTimeout            = 5 * time.Second
-	DefaultQoS                  byte = 0
+	DefaultMQTTScheme                    = "tcp"
+	DefaultMQTTKeepAlive                 = 120 * time.Second
+	DefaultMQTTConnectTimeout            = 10 * time.Second
+	DefaultMQTTMaxReconnectInterval      = 30 * time.Second
+	DefaultMQTTConnectRetryInterval      = 2 * time.Second
+	DefaultMQTTPublishTimeout            = 5 * time.Second
+	DefaultMQTTQoS                  byte = 0
 )
 
-// Config describes an MQTT client. The zero value is not usable — Host and Port
-// are required — but every other field has a default applied by Connect.
-type Config struct {
+// MQTTConfig describes an MQTT client. The zero value is not usable — Host and Port
+// are required — but every other field has a default applied by ConnectMQTT.
+type MQTTConfig struct {
 	Host     string
 	Port     string
 	Username string
@@ -72,10 +73,10 @@ type Config struct {
 }
 
 // applyDefaults fills in fields left at their zero value.
-func (c *Config) applyDefaults() {
+func (c *MQTTConfig) applyDefaults() {
 
 	if c.Scheme == "" {
-		c.Scheme = DefaultScheme
+		c.Scheme = DefaultMQTTScheme
 	}
 
 	if c.ClientIDPrefix == "" {
@@ -88,24 +89,24 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.KeepAlive <= 0 {
-		c.KeepAlive = DefaultKeepAlive
+		c.KeepAlive = DefaultMQTTKeepAlive
 	}
 
 	if c.ConnectTimeout <= 0 {
-		c.ConnectTimeout = DefaultConnectTimeout
+		c.ConnectTimeout = DefaultMQTTConnectTimeout
 	}
 
 	if c.ConnectRetryInterval <= 0 {
-		c.ConnectRetryInterval = DefaultConnectRetryInterval
+		c.ConnectRetryInterval = DefaultMQTTConnectRetryInterval
 	}
 
 	if c.MaxReconnectInterval <= 0 {
-		c.MaxReconnectInterval = DefaultMaxReconnectInterval
+		c.MaxReconnectInterval = DefaultMQTTMaxReconnectInterval
 	}
 }
 
 // validate reports the first required field that is missing.
-func (c *Config) validate() error {
+func (c *MQTTConfig) validate() error {
 
 	switch {
 	case c.Host == "":
@@ -118,55 +119,55 @@ func (c *Config) validate() error {
 }
 
 // broker returns the broker URI the client dials.
-func (c *Config) broker() string {
+func (c *MQTTConfig) broker() string {
 
 	return fmt.Sprintf("%s://%s:%s", c.Scheme, c.Host, c.Port)
 }
 
-// ConfigFromEnv reads a Config from the environment.
-func ConfigFromEnv() Config {
+// MQTTConfigFromEnv reads an MQTTConfig from the environment.
+func MQTTConfigFromEnv() MQTTConfig {
 
-	return Config{
+	return MQTTConfig{
 		Host:                 env.String("MQTT_HOST", ""),
 		Port:                 env.String("MQTT_PORT", ""),
 		Username:             env.String("MQTT_USERNAME", ""),
 		Password:             env.String("MQTT_PASSWORD", ""),
-		Scheme:               env.String("MQTT_SCHEME", DefaultScheme),
+		Scheme:               env.String("MQTT_SCHEME", DefaultMQTTScheme),
 		ClientIDPrefix:       env.String("CLIENT_ID", ""),
-		KeepAlive:            env.Seconds("MQTT_KEEP_ALIVE", DefaultKeepAlive),
-		ConnectTimeout:       env.Seconds("MQTT_CONNECT_TIMEOUT", DefaultConnectTimeout),
-		MaxReconnectInterval: env.Seconds("MQTT_MAX_RECONNECT_INTERVAL", DefaultMaxReconnectInterval),
+		KeepAlive:            env.Seconds("MQTT_KEEP_ALIVE", DefaultMQTTKeepAlive),
+		ConnectTimeout:       env.Seconds("MQTT_CONNECT_TIMEOUT", DefaultMQTTConnectTimeout),
+		MaxReconnectInterval: env.Seconds("MQTT_MAX_RECONNECT_INTERVAL", DefaultMQTTMaxReconnectInterval),
 		CleanSession:         env.Bool("MQTT_CLEAN_SESSION", true),
 	}
 }
 
-// ConnectFromEnv connects using the settings read from the environment.
-func ConnectFromEnv() (paho.Client, error) {
+// ConnectMQTTFromEnv connects using the settings read from the environment.
+func ConnectMQTTFromEnv() (paho.Client, error) {
 
-	return ConnectWithContext(context.Background(), ConfigFromEnv())
+	return ConnectMQTTWithContext(context.Background(), MQTTConfigFromEnv())
 }
 
-// ConnectFromEnvWithContext is ConnectFromEnv with the first connection
+// ConnectMQTTFromEnvWithContext is ConnectFromEnv with the first connection
 // attempt bound to ctx.
-func ConnectFromEnvWithContext(ctx context.Context) (paho.Client, error) {
+func ConnectMQTTFromEnvWithContext(ctx context.Context) (paho.Client, error) {
 
-	return ConnectWithContext(ctx, ConfigFromEnv())
+	return ConnectMQTTWithContext(ctx, MQTTConfigFromEnv())
 }
 
-// Connect validates cfg and establishes a client, waiting up to ConnectTimeout
+// ConnectMQTT validates cfg and establishes a client, waiting up to ConnectTimeout
 // for the first connection. It never returns a non-nil client alongside an
 // error, and never returns a nil client with a nil error.
 //
 // Once connected, the client redials on its own if the broker goes away, so
 // callers hold on to it for the lifetime of the process.
-func Connect(cfg Config) (paho.Client, error) {
+func ConnectMQTT(cfg MQTTConfig) (paho.Client, error) {
 
-	return ConnectWithContext(context.Background(), cfg)
+	return ConnectMQTTWithContext(context.Background(), cfg)
 }
 
-// ConnectWithContext is Connect with the first connection attempt bound to
+// ConnectMQTTWithContext is ConnectMQTT with the first connection attempt bound to
 // ctx as well as ConnectTimeout.
-func ConnectWithContext(ctx context.Context, cfg Config) (paho.Client, error) {
+func ConnectMQTTWithContext(ctx context.Context, cfg MQTTConfig) (paho.Client, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -206,7 +207,7 @@ func ConnectWithContext(ctx context.Context, cfg Config) (paho.Client, error) {
 
 	token := client.Connect()
 
-	if !waitToken(ctx, token, cfg.ConnectTimeout) {
+	if !waitMQTTToken(ctx, token, cfg.ConnectTimeout) {
 
 		client.Disconnect(0)
 
@@ -223,31 +224,31 @@ func ConnectWithContext(ctx context.Context, cfg Config) (paho.Client, error) {
 	return client, nil
 }
 
-// Publish marshals payload as JSON and publishes it to topic at QoS 0. A nil or
+// PublishMQTT marshals payload as JSON and publishes it to topic at QoS 0. A nil or
 // disconnected client is reported as an error rather than panicking or being
 // silently dropped.
-func Publish(client paho.Client, topic string, payload any) error {
+func PublishMQTT(client paho.Client, topic string, payload any) error {
 
-	return PublishWithQoSWithContext(context.Background(), client, topic, payload, DefaultQoS, false)
+	return PublishMQTTWithQoSWithContext(context.Background(), client, topic, payload, DefaultMQTTQoS, false)
 }
 
-// PublishWithContext is Publish bounded by ctx.
-func PublishWithContext(ctx context.Context, client paho.Client, topic string, payload any) error {
+// PublishMQTTWithContext is PublishMQTT bounded by ctx.
+func PublishMQTTWithContext(ctx context.Context, client paho.Client, topic string, payload any) error {
 
-	return PublishWithQoSWithContext(ctx, client, topic, payload, DefaultQoS, false)
+	return PublishMQTTWithQoSWithContext(ctx, client, topic, payload, DefaultMQTTQoS, false)
 }
 
-// PublishWithQoS publishes at an explicit quality of service, optionally
+// PublishMQTTWithQoS publishes at an explicit quality of service, optionally
 // retaining the message on the broker.
-func PublishWithQoS(client paho.Client, topic string, payload any, qos byte, retained bool) error {
+func PublishMQTTWithQoS(client paho.Client, topic string, payload any, qos byte, retained bool) error {
 
-	return PublishWithQoSWithContext(context.Background(), client, topic, payload, qos, retained)
+	return PublishMQTTWithQoSWithContext(context.Background(), client, topic, payload, qos, retained)
 }
 
-// PublishWithQoSWithContext is PublishWithQoS bounded by ctx.
-func PublishWithQoSWithContext(ctx context.Context, client paho.Client, topic string, payload any, qos byte, retained bool) error {
+// PublishMQTTWithQoSWithContext is PublishMQTTWithQoS bounded by ctx.
+func PublishMQTTWithQoSWithContext(ctx context.Context, client paho.Client, topic string, payload any, qos byte, retained bool) error {
 
-	if err := checkClient(client); err != nil {
+	if err := checkMQTTClient(client); err != nil {
 		return err
 	}
 
@@ -256,28 +257,28 @@ func PublishWithQoSWithContext(ctx context.Context, client paho.Client, topic st
 		return fmt.Errorf("mqtt: encode payload for %s: %w", topic, err)
 	}
 
-	return send(ctx, client, topic, body, qos, retained)
+	return sendMQTT(ctx, client, topic, body, qos, retained)
 }
 
-// PublishRaw publishes an already-encoded body as is, for callers that build
-// the message themselves. Passing a string to Publish would JSON-quote it.
-func PublishRaw(client paho.Client, topic string, body []byte, qos byte, retained bool) error {
+// PublishMQTTRaw publishes an already-encoded body as is, for callers that build
+// the message themselves. Passing a string to PublishMQTT would JSON-quote it.
+func PublishMQTTRaw(client paho.Client, topic string, body []byte, qos byte, retained bool) error {
 
-	return PublishRawWithContext(context.Background(), client, topic, body, qos, retained)
+	return PublishMQTTRawWithContext(context.Background(), client, topic, body, qos, retained)
 }
 
-// PublishRawWithContext is PublishRaw bounded by ctx.
-func PublishRawWithContext(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
+// PublishMQTTRawWithContext is PublishMQTTRaw bounded by ctx.
+func PublishMQTTRawWithContext(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
 
-	if err := checkClient(client); err != nil {
+	if err := checkMQTTClient(client); err != nil {
 		return err
 	}
 
-	return send(ctx, client, topic, body, qos, retained)
+	return sendMQTT(ctx, client, topic, body, qos, retained)
 }
 
-// checkClient reports a nil or disconnected client.
-func checkClient(client paho.Client) error {
+// checkMQTTClient reports a nil or disconnected client.
+func checkMQTTClient(client paho.Client) error {
 
 	if client == nil {
 		return fmt.Errorf("mqtt: not initialised")
@@ -295,13 +296,13 @@ func checkClient(client paho.Client) error {
 	return nil
 }
 
-// send publishes body and waits for the broker to accept it.
-func send(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
+// sendMQTT publishes body and waits for the broker to accept it.
+func sendMQTT(ctx context.Context, client paho.Client, topic string, body []byte, qos byte, retained bool) error {
 
 	token := client.Publish(topic, qos, retained, body)
 
-	if !waitToken(ctx, token, DefaultPublishTimeout) {
-		return fmt.Errorf("mqtt: publish %s: timed out after %s", topic, DefaultPublishTimeout)
+	if !waitMQTTToken(ctx, token, DefaultMQTTPublishTimeout) {
+		return fmt.Errorf("mqtt: publish %s: timed out after %s", topic, DefaultMQTTPublishTimeout)
 	}
 
 	if err := token.Error(); err != nil {
@@ -311,10 +312,10 @@ func send(ctx context.Context, client paho.Client, topic string, body []byte, qo
 	return nil
 }
 
-// waitToken reports whether token completed before ctx was cancelled or the
+// waitMQTTToken reports whether token completed before ctx was cancelled or the
 // timeout elapsed. paho's own Wait blocks uninterruptibly, so the token is
 // polled through its Done channel instead to keep cancellation working.
-func waitToken(ctx context.Context, token paho.Token, timeout time.Duration) bool {
+func waitMQTTToken(ctx context.Context, token paho.Token, timeout time.Duration) bool {
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()

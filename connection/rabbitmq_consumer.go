@@ -1,4 +1,4 @@
-package rabbitmq
+package connection
 
 import (
 	"context"
@@ -13,19 +13,19 @@ import (
 
 // Default consumer settings.
 const (
-	DefaultPrefetchCount = 1
-	DefaultMaxPriority   = 5
+	DefaultRabbitMQPrefetchCount = 1
+	DefaultRabbitMQMaxPriority   = 5
 )
 
-// Handler processes one delivery. Returning nil acknowledges the message;
+// RabbitMQHandler processes one delivery. Returning nil acknowledges the message;
 // returning an error rejects it according to the consumer's Requeue setting.
 //
-// A panic inside a Handler is recovered and treated as an error, so one
+// A panic inside a RabbitMQHandler is recovered and treated as an error, so one
 // malformed message cannot take the service down.
-type Handler func(ctx context.Context, delivery amqp.Delivery) error
+type RabbitMQHandler func(ctx context.Context, delivery amqp.Delivery) error
 
-// ConsumerConfig describes a queue to consume. Only Queue is required.
-type ConsumerConfig struct {
+// RabbitMQConsumerConfig describes a queue to consume. Only Queue is required.
+type RabbitMQConsumerConfig struct {
 	// Queue is the unprefixed queue name; QUEUE_PREFIX is applied to it.
 	Queue string
 
@@ -43,19 +43,19 @@ type ConsumerConfig struct {
 }
 
 // applyDefaults fills in fields left at their zero value.
-func (cfg *ConsumerConfig) applyDefaults() {
+func (cfg *RabbitMQConsumerConfig) applyDefaults() {
 
 	if cfg.PrefetchCount <= 0 {
-		cfg.PrefetchCount = DefaultPrefetchCount
+		cfg.PrefetchCount = DefaultRabbitMQPrefetchCount
 	}
 
 	if cfg.MaxPriority <= 0 {
-		cfg.MaxPriority = DefaultMaxPriority
+		cfg.MaxPriority = DefaultRabbitMQMaxPriority
 	}
 }
 
 // Consume declares the queue's topology and delivers messages to handler until
-// the Conn is closed.
+// the connection is closed.
 //
 // It runs as a loop rather than recursing on reconnect: when the broker drops
 // the connection, it waits for the supervisor to redial, re-declares the
@@ -63,17 +63,17 @@ func (cfg *ConsumerConfig) applyDefaults() {
 // what makes it survive a broker that came back with no topology.
 //
 // Consume blocks, so callers run it in a goroutine — one per queue.
-func (c *Conn) Consume(cfg ConsumerConfig, handler Handler) error {
+func (c *RabbitMQ) Consume(cfg RabbitMQConsumerConfig, handler RabbitMQHandler) error {
 
 	return c.ConsumeWithContext(context.Background(), cfg, handler)
 }
 
 // ConsumeWithContext is Consume that also stops when ctx is cancelled. The
 // handler receives ctx, so spans started from it propagate.
-func (c *Conn) ConsumeWithContext(ctx context.Context, cfg ConsumerConfig, handler Handler) error {
+func (c *RabbitMQ) ConsumeWithContext(ctx context.Context, cfg RabbitMQConsumerConfig, handler RabbitMQHandler) error {
 
 	if c == nil {
-		return ErrNotConnected
+		return ErrRabbitMQNotConnected
 	}
 
 	if cfg.Queue == "" {
@@ -107,7 +107,7 @@ func (c *Conn) ConsumeWithContext(ctx context.Context, cfg ConsumerConfig, handl
 			// and the next attempt starts from the shortest delay again.
 			schedule.Reset()
 
-		case errors.Is(err, context.Canceled), errors.Is(err, ErrClosed):
+		case errors.Is(err, context.Canceled), errors.Is(err, ErrRabbitMQClosed):
 			return nil
 
 		default:
@@ -131,7 +131,7 @@ func (c *Conn) ConsumeWithContext(ctx context.Context, cfg ConsumerConfig, handl
 
 // consumeOnce establishes the topology and drains deliveries until the channel
 // closes or ctx is cancelled.
-func (c *Conn) consumeOnce(ctx context.Context, cfg ConsumerConfig, queue string, handler Handler) error {
+func (c *RabbitMQ) consumeOnce(ctx context.Context, cfg RabbitMQConsumerConfig, queue string, handler RabbitMQHandler) error {
 
 	channel, err := c.Channel()
 	if err != nil {
@@ -194,7 +194,7 @@ func (c *Conn) consumeOnce(ctx context.Context, cfg ConsumerConfig, queue string
 // handleDelivery runs the handler for one message and settles the delivery.
 // A handler that panics is recovered and the message is rejected, rather than
 // the panic unwinding into the consumer goroutine and killing the process.
-func (c *Conn) handleDelivery(ctx context.Context, cfg ConsumerConfig, queue string, delivery amqp.Delivery, handler Handler) {
+func (c *RabbitMQ) handleDelivery(ctx context.Context, cfg RabbitMQConsumerConfig, queue string, delivery amqp.Delivery, handler RabbitMQHandler) {
 
 	err := invoke(ctx, delivery, handler)
 
@@ -232,7 +232,7 @@ func (c *Conn) handleDelivery(ctx context.Context, cfg ConsumerConfig, queue str
 }
 
 // invoke calls handler, converting a panic into an error.
-func invoke(ctx context.Context, delivery amqp.Delivery, handler Handler) (err error) {
+func invoke(ctx context.Context, delivery amqp.Delivery, handler RabbitMQHandler) (err error) {
 
 	defer func() {
 

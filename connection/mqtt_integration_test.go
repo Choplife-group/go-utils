@@ -1,6 +1,6 @@
 //go:build integration
 
-package mqtt
+package connection
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 // Run with a live broker:
 //
 //	docker run -d --name emqx-it -p 1884:1883 emqx/emqx:latest
-//	MQTT_HOST=127.0.0.1 MQTT_PORT=1884 go test -tags integration ./connection/mqtt/ -v
+//	MQTT_HOST=127.0.0.1 MQTT_PORT=1884 go test -tags integration ./connection/ -run TestMQTT -v
 
-func TestConnectAndPublishAgainstLiveBroker(t *testing.T) {
+func TestMQTTConnectAndPublishAgainstLiveBroker(t *testing.T) {
 
-	cfg := ConfigFromEnv()
+	cfg := MQTTConfigFromEnv()
 
 	if cfg.Host == "" {
 		t.Skip("set MQTT_HOST to run this")
@@ -29,7 +29,7 @@ func TestConnectAndPublishAgainstLiveBroker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client, err := ConnectWithContext(ctx, cfg)
+	client, err := ConnectMQTTWithContext(ctx, cfg)
 	if err != nil {
 		t.Fatalf("Connect() = %v", err)
 	}
@@ -55,7 +55,7 @@ func TestConnectAndPublishAgainstLiveBroker(t *testing.T) {
 		t.Fatalf("Subscribe() = %v", err)
 	}
 
-	if err := PublishWithContext(ctx, client, topic, map[string]string{"hello": "world"}); err != nil {
+	if err := PublishMQTTWithContext(ctx, client, topic, map[string]string{"hello": "world"}); err != nil {
 		t.Fatalf("Publish() = %v", err)
 	}
 
@@ -71,7 +71,7 @@ func TestConnectAndPublishAgainstLiveBroker(t *testing.T) {
 	}
 }
 
-// TestReconnectAfterBrokerRestart proves the client comes back on its own when
+// TestMQTTReconnectAfterBrokerRestart proves the client comes back on its own when
 // the broker restarts, which is the whole reason Connect turns on paho's
 // auto-reconnect. It needs a container it is allowed to restart, named by
 // MQTT_CONTAINER.
@@ -79,14 +79,14 @@ func TestConnectAndPublishAgainstLiveBroker(t *testing.T) {
 // Subscriptions are re-established from the OnConnect callback rather than
 // assumed to survive: with CleanSession set the broker discards the session on
 // disconnect, so a subscriber that does not re-subscribe goes quietly deaf.
-func TestReconnectAfterBrokerRestart(t *testing.T) {
+func TestMQTTReconnectAfterBrokerRestart(t *testing.T) {
 
 	container := os.Getenv("MQTT_CONTAINER")
 	if container == "" {
 		t.Skip("set MQTT_CONTAINER to the broker container name to run this")
 	}
 
-	cfg := ConfigFromEnv()
+	cfg := MQTTConfigFromEnv()
 
 	if cfg.Host == "" {
 		t.Skip("set MQTT_HOST to run this")
@@ -106,7 +106,7 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 		}
 	}
 
-	client, err := ConnectWithContext(ctx, cfg)
+	client, err := ConnectMQTTWithContext(ctx, cfg)
 	if err != nil {
 		t.Fatalf("Connect() = %v", err)
 	}
@@ -132,7 +132,7 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 
 	subscribe()
 
-	if err := PublishWithContext(ctx, client, topic, map[string]string{"phase": "before"}); err != nil {
+	if err := PublishMQTTWithContext(ctx, client, topic, map[string]string{"phase": "before"}); err != nil {
 		t.Fatalf("Publish() before restart = %v", err)
 	}
 
@@ -152,11 +152,11 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 		t.Fatalf("docker restart %s: %v: %s", container, err, out)
 	}
 
-	if !waitFor(func() bool { return !client.IsConnectionOpen() }, 60*time.Second) {
+	if !waitForMQTT(func() bool { return !client.IsConnectionOpen() }, 60*time.Second) {
 		t.Fatal("client never registered as disconnected")
 	}
 
-	if !waitFor(client.IsConnectionOpen, 120*time.Second) {
+	if !waitForMQTT(client.IsConnectionOpen, 120*time.Second) {
 		t.Fatal("client never reconnected")
 	}
 
@@ -174,7 +174,7 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 
 	for time.Now().Before(deadline) {
 
-		if err := PublishWithContext(ctx, client, topic, map[string]string{"phase": "after"}); err == nil {
+		if err := PublishMQTTWithContext(ctx, client, topic, map[string]string{"phase": "after"}); err == nil {
 			break
 		}
 
@@ -188,8 +188,8 @@ func TestReconnectAfterBrokerRestart(t *testing.T) {
 	}
 }
 
-// waitFor polls condition until it holds or the timeout elapses.
-func waitFor(condition func() bool, timeout time.Duration) bool {
+// waitForMQTT polls condition until it holds or the timeout elapses.
+func waitForMQTT(condition func() bool, timeout time.Duration) bool {
 
 	deadline := time.Now().Add(timeout)
 
@@ -205,18 +205,18 @@ func waitFor(condition func() bool, timeout time.Duration) bool {
 	return false
 }
 
-// TestPlainVariantsAgainstLiveBroker drives the no-ctx forms end to end, and
+// TestMQTTPlainVariantsAgainstLiveBroker drives the no-ctx forms end to end, and
 // checks PublishRaw delivers a pre-encoded body untouched — the way services
 // send websocket messages they have already marshalled.
-func TestPlainVariantsAgainstLiveBroker(t *testing.T) {
+func TestMQTTPlainVariantsAgainstLiveBroker(t *testing.T) {
 
-	cfg := ConfigFromEnv()
+	cfg := MQTTConfigFromEnv()
 
 	if cfg.Host == "" {
 		t.Skip("set MQTT_HOST to run this")
 	}
 
-	client, err := Connect(cfg)
+	client, err := ConnectMQTT(cfg)
 	if err != nil {
 		t.Fatalf("Connect() = %v", err)
 	}
@@ -238,11 +238,11 @@ func TestPlainVariantsAgainstLiveBroker(t *testing.T) {
 		t.Fatalf("Subscribe() = %v", err)
 	}
 
-	if err := PublishRaw(client, topic, []byte(`{"event":"deposit","status":-1}`), 1, false); err != nil {
+	if err := PublishMQTTRaw(client, topic, []byte(`{"event":"deposit","status":-1}`), 1, false); err != nil {
 		t.Fatalf("PublishRaw() = %v", err)
 	}
 
-	if err := Publish(client, topic, map[string]string{"hello": "world"}); err != nil {
+	if err := PublishMQTT(client, topic, map[string]string{"hello": "world"}); err != nil {
 		t.Fatalf("Publish() = %v", err)
 	}
 
@@ -266,25 +266,25 @@ func TestPlainVariantsAgainstLiveBroker(t *testing.T) {
 	}
 }
 
-// TestFromEnvConstructorsAndPublishForms connects with both environment-driven
+// TestMQTTFromEnvConstructorsAndPublishForms connects with both environment-driven
 // constructors and sends through every publish form not covered above.
-func TestFromEnvConstructorsAndPublishForms(t *testing.T) {
+func TestMQTTFromEnvConstructorsAndPublishForms(t *testing.T) {
 
-	if ConfigFromEnv().Host == "" {
+	if MQTTConfigFromEnv().Host == "" {
 		t.Skip("set MQTT_HOST to run this")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client, err := ConnectFromEnv()
+	client, err := ConnectMQTTFromEnv()
 	if err != nil {
 		t.Fatalf("ConnectFromEnv() = %v", err)
 	}
 
 	defer client.Disconnect(250)
 
-	publisher, err := ConnectFromEnvWithContext(ctx)
+	publisher, err := ConnectMQTTFromEnvWithContext(ctx)
 	if err != nil {
 		t.Fatalf("ConnectFromEnvWithContext() = %v", err)
 	}
@@ -302,15 +302,15 @@ func TestFromEnvConstructorsAndPublishForms(t *testing.T) {
 		t.Fatalf("Subscribe() = %v", token.Error())
 	}
 
-	if err := PublishWithQoS(publisher, topic, map[string]string{"form": "qos"}, 1, false); err != nil {
+	if err := PublishMQTTWithQoS(publisher, topic, map[string]string{"form": "qos"}, 1, false); err != nil {
 		t.Fatalf("PublishWithQoS() = %v", err)
 	}
 
-	if err := PublishWithQoSWithContext(ctx, publisher, topic, map[string]string{"form": "qos-ctx"}, 1, false); err != nil {
+	if err := PublishMQTTWithQoSWithContext(ctx, publisher, topic, map[string]string{"form": "qos-ctx"}, 1, false); err != nil {
 		t.Fatalf("PublishWithQoSWithContext() = %v", err)
 	}
 
-	if err := PublishRawWithContext(ctx, publisher, topic, []byte(`{"form":"raw-ctx"}`), 1, false); err != nil {
+	if err := PublishMQTTRawWithContext(ctx, publisher, topic, []byte(`{"form":"raw-ctx"}`), 1, false); err != nil {
 		t.Fatalf("PublishRawWithContext() = %v", err)
 	}
 

@@ -1,4 +1,4 @@
-// Package rabbitmq opens supervised RabbitMQ connections.
+// DialRabbitMQ opens supervised RabbitMQ connections.
 //
 // Settings are read from the environment:
 //
@@ -12,13 +12,13 @@
 //	RABBITMQ_RECONNECT_MAX        (optional) redial delay ceiling in seconds, default 30
 //	QUEUE_PREFIX                  (optional) namespace prepended to queue names
 //
-// Dial establishes the first connection and returns an error if it cannot, so a
-// broker that is down is visible at startup instead of surfacing later as a nil
+// DialRabbitMQ establishes the first connection and returns an error if it
+// cannot, so a broker that is down is visible at startup instead of surfacing later as a nil
 // dereference. After that a supervisor goroutine owns the connection: when the
 // broker drops it, the supervisor redials with jittered exponential backoff
 // until it is back, and Consume re-declares its topology and resumes. Nothing in
-// this package panics, calls os.Exit or logs a credential.
-package rabbitmq
+// this file panics, calls os.Exit or logs a credential.
+package connection
 
 import (
 	"context"
@@ -37,27 +37,27 @@ import (
 
 // Default connection settings.
 const (
-	DefaultHeartbeat      = 10 * time.Second
-	DefaultDialTimeout    = 10 * time.Second
-	DefaultReconnectMin   = 1 * time.Second
-	DefaultReconnectMax   = 30 * time.Second
-	DefaultPublishTimeout = 5 * time.Second
+	DefaultRabbitMQHeartbeat      = 10 * time.Second
+	DefaultRabbitMQDialTimeout    = 10 * time.Second
+	DefaultRabbitMQReconnectMin   = 1 * time.Second
+	DefaultRabbitMQReconnectMax   = 30 * time.Second
+	DefaultRabbitMQPublishTimeout = 5 * time.Second
 )
 
 // Errors returned when a connection cannot serve a request. They are typed so
 // callers can distinguish "come back in a moment" from "this is over".
 var (
-	// ErrNotConnected is returned while a redial is in flight.
-	ErrNotConnected = errors.New("rabbitmq: not connected")
+	// ErrRabbitMQNotConnected is returned while a redial is in flight.
+	ErrRabbitMQNotConnected = errors.New("rabbitmq: not connected")
 
-	// ErrClosed is returned once Close has been called.
-	ErrClosed = errors.New("rabbitmq: connection closed")
+	// ErrRabbitMQClosed is returned once Close has been called.
+	ErrRabbitMQClosed = errors.New("rabbitmq: connection closed")
 )
 
-// Config describes a RabbitMQ connection. The zero value is not usable — Host,
-// Port and Username are required — but every other field has a default applied
-// by Dial.
-type Config struct {
+// RabbitMQConfig describes a RabbitMQ connection. The zero value is not usable —
+// Host, Port and Username are required — but every other field has a default
+// applied by DialRabbitMQ.
+type RabbitMQConfig struct {
 	Host     string
 	Port     string
 	Username string
@@ -80,22 +80,22 @@ type Config struct {
 }
 
 // applyDefaults fills in fields left at their zero value.
-func (c *Config) applyDefaults() {
+func (c *RabbitMQConfig) applyDefaults() {
 
 	if c.Heartbeat <= 0 {
-		c.Heartbeat = DefaultHeartbeat
+		c.Heartbeat = DefaultRabbitMQHeartbeat
 	}
 
 	if c.DialTimeout <= 0 {
-		c.DialTimeout = DefaultDialTimeout
+		c.DialTimeout = DefaultRabbitMQDialTimeout
 	}
 
 	if c.ReconnectMin <= 0 {
-		c.ReconnectMin = DefaultReconnectMin
+		c.ReconnectMin = DefaultRabbitMQReconnectMin
 	}
 
 	if c.ReconnectMax <= 0 {
-		c.ReconnectMax = DefaultReconnectMax
+		c.ReconnectMax = DefaultRabbitMQReconnectMax
 	}
 
 	if c.Name == "" {
@@ -104,7 +104,7 @@ func (c *Config) applyDefaults() {
 }
 
 // validate reports the first required field that is missing.
-func (c *Config) validate() error {
+func (c *RabbitMQConfig) validate() error {
 
 	if c.URI != "" {
 		return nil
@@ -125,7 +125,7 @@ func (c *Config) validate() error {
 // uri returns the AMQP URI to dial. Credentials are percent-encoded, so a
 // password containing a "/" or "@" connects rather than producing a confusing
 // parse failure.
-func (c *Config) uri() string {
+func (c *RabbitMQConfig) uri() string {
 
 	if c.URI != "" {
 		return c.URI
@@ -140,10 +140,10 @@ func (c *Config) uri() string {
 	)
 }
 
-// ConfigFromEnv reads a Config from the environment.
-func ConfigFromEnv() Config {
+// RabbitMQConfigFromEnv reads a RabbitMQConfig from the environment.
+func RabbitMQConfigFromEnv() RabbitMQConfig {
 
-	return Config{
+	return RabbitMQConfig{
 		Host:         env.String("RABBITMQ_HOST", ""),
 		Port:         env.String("RABBITMQ_PORT", ""),
 		Username:     env.String("RABBITMQ_USER", ""),
@@ -151,18 +151,18 @@ func ConfigFromEnv() Config {
 		VHost:        env.String("RABBITMQ_VHOST", ""),
 		URI:          env.String("RABBITMQ_URI", ""),
 		Name:         env.String("OTEL_SERVICE_NAME", ""),
-		Heartbeat:    env.Seconds("RABBITMQ_HEARTBEAT", DefaultHeartbeat),
-		ReconnectMin: env.Seconds("RABBITMQ_RECONNECT_MIN", DefaultReconnectMin),
-		ReconnectMax: env.Seconds("RABBITMQ_RECONNECT_MAX", DefaultReconnectMax),
+		Heartbeat:    env.Seconds("RABBITMQ_HEARTBEAT", DefaultRabbitMQHeartbeat),
+		ReconnectMin: env.Seconds("RABBITMQ_RECONNECT_MIN", DefaultRabbitMQReconnectMin),
+		ReconnectMax: env.Seconds("RABBITMQ_RECONNECT_MAX", DefaultRabbitMQReconnectMax),
 		QueuePrefix:  env.String("QUEUE_PREFIX", ""),
 	}
 }
 
-// Conn is a RabbitMQ connection that redials itself. It is safe for concurrent
-// use, and a single Conn is meant to be shared by every publisher and consumer
-// in a service.
-type Conn struct {
-	cfg Config
+// RabbitMQ is a RabbitMQ connection that redials itself. It is safe for
+// concurrent use, and a single RabbitMQ is meant to be shared by every
+// publisher and consumer in a service.
+type RabbitMQ struct {
+	cfg RabbitMQConfig
 
 	mu     sync.RWMutex
 	conn   *amqp.Connection
@@ -173,31 +173,32 @@ type Conn struct {
 	cancel context.CancelFunc
 }
 
-// DialFromEnv connects using the settings read from the environment.
-func DialFromEnv() (*Conn, error) {
+// DialRabbitMQFromEnv connects using the settings read from the environment.
+func DialRabbitMQFromEnv() (*RabbitMQ, error) {
 
-	return DialWithContext(context.Background(), ConfigFromEnv())
+	return DialRabbitMQWithContext(context.Background(), RabbitMQConfigFromEnv())
 }
 
-// DialFromEnvWithContext is DialFromEnv with the Conn's lifetime bound to ctx.
-func DialFromEnvWithContext(ctx context.Context) (*Conn, error) {
+// DialRabbitMQFromEnvWithContext is DialRabbitMQFromEnv with the connection's
+// lifetime bound to ctx.
+func DialRabbitMQFromEnvWithContext(ctx context.Context) (*RabbitMQ, error) {
 
-	return DialWithContext(ctx, ConfigFromEnv())
+	return DialRabbitMQWithContext(ctx, RabbitMQConfigFromEnv())
 }
 
-// Dial validates cfg and establishes the first connection, returning an error
-// if the broker cannot be reached. It never returns a non-nil Conn alongside an
-// error, and never returns a nil Conn with a nil error.
+// DialRabbitMQ validates cfg and establishes the first connection, returning an error
+// if the broker cannot be reached. It never returns a non-nil RabbitMQ alongside an
+// error, and never returns a nil RabbitMQ with a nil error.
 //
-// The returned Conn supervises itself until Close is called.
-func Dial(cfg Config) (*Conn, error) {
+// The returned RabbitMQ supervises itself until Close is called.
+func DialRabbitMQ(cfg RabbitMQConfig) (*RabbitMQ, error) {
 
-	return DialWithContext(context.Background(), cfg)
+	return DialRabbitMQWithContext(context.Background(), cfg)
 }
 
-// DialWithContext is Dial with the Conn also stopping when ctx is cancelled,
-// so ctx should live as long as the service does.
-func DialWithContext(ctx context.Context, cfg Config) (*Conn, error) {
+// DialRabbitMQWithContext is DialRabbitMQ with the connection also stopping when
+// ctx is cancelled, so ctx should live as long as the service does.
+func DialRabbitMQWithContext(ctx context.Context, cfg RabbitMQConfig) (*RabbitMQ, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -205,14 +206,14 @@ func DialWithContext(ctx context.Context, cfg Config) (*Conn, error) {
 
 	cfg.applyDefaults()
 
-	amqpConn, err := dial(cfg)
+	amqpConn, err := dialRabbitMQ(cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	supervisorCtx, cancel := context.WithCancel(ctx)
 
-	c := &Conn{
+	c := &RabbitMQ{
 		cfg:    cfg,
 		conn:   amqpConn,
 		ready:  make(chan struct{}),
@@ -227,8 +228,8 @@ func DialWithContext(ctx context.Context, cfg Config) (*Conn, error) {
 	return c, nil
 }
 
-// dial opens a single connection to the broker.
-func dial(cfg Config) (*amqp.Connection, error) {
+// dialRabbitMQ opens a single connection to the broker.
+func dialRabbitMQ(cfg RabbitMQConfig) (*amqp.Connection, error) {
 
 	uri := cfg.uri()
 
@@ -253,7 +254,7 @@ func dial(cfg Config) (*amqp.Connection, error) {
 // supervise watches conn and redials when the broker drops it. It tracks the
 // connection itself rather than reading c.conn, which dropIfDead may already
 // have cleared.
-func (c *Conn) supervise(conn *amqp.Connection) {
+func (c *RabbitMQ) supervise(conn *amqp.Connection) {
 
 	defer recoverPanic(c.ctx, "rabbitmq supervisor")
 
@@ -276,9 +277,9 @@ func (c *Conn) supervise(conn *amqp.Connection) {
 			logrus.WithContext(c.ctx).
 				WithFields(logrus.Fields{
 					"description": "rabbitmq connection closed, reconnecting",
-					"data":        closeReason(reason),
+					"data":        rabbitMQCloseReason(reason),
 				}).
-				Error(closeReason(reason))
+				Error(rabbitMQCloseReason(reason))
 
 			c.markDisconnected()
 
@@ -292,10 +293,10 @@ func (c *Conn) supervise(conn *amqp.Connection) {
 	}
 }
 
-// redial retries the connection until it succeeds, the Conn is closed or the
+// redial retries the connection until it succeeds, the connection is closed or the
 // supervisor context is cancelled. It returns the restored connection and
 // whether there is one.
-func (c *Conn) redial() (*amqp.Connection, bool) {
+func (c *RabbitMQ) redial() (*amqp.Connection, bool) {
 
 	schedule := backoff.Backoff{Min: c.cfg.ReconnectMin, Max: c.cfg.ReconnectMax}
 
@@ -309,7 +310,7 @@ func (c *Conn) redial() (*amqp.Connection, bool) {
 			return nil, false
 		}
 
-		conn, err := dial(c.cfg)
+		conn, err := dialRabbitMQ(c.cfg)
 		if err != nil {
 
 			logrus.WithContext(c.ctx).
@@ -334,8 +335,8 @@ func (c *Conn) redial() (*amqp.Connection, bool) {
 }
 
 // adopt installs a freshly dialled connection and wakes everything waiting on
-// Ready. It reports false if the Conn was closed in the meantime.
-func (c *Conn) adopt(conn *amqp.Connection) bool {
+// Ready. It reports false if the connection was closed in the meantime.
+func (c *RabbitMQ) adopt(conn *amqp.Connection) bool {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -359,7 +360,7 @@ func (c *Conn) adopt(conn *amqp.Connection) bool {
 
 // markDisconnected clears the dead connection and re-arms the ready channel so
 // callers block until a redial succeeds.
-func (c *Conn) markDisconnected() {
+func (c *RabbitMQ) markDisconnected() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -373,11 +374,11 @@ func (c *Conn) markDisconnected() {
 	}
 }
 
-// dropIfDead marks the Conn disconnected when the connection it holds has
+// dropIfDead marks the connection disconnected when the connection it holds has
 // already closed but the supervisor has not caught up yet. Without it, a caller
 // that hit the dead socket would find Ready still closed and retry on the same
 // dead connection instead of waiting for the redial.
-func (c *Conn) dropIfDead() {
+func (c *RabbitMQ) dropIfDead() {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -396,12 +397,12 @@ func (c *Conn) dropIfDead() {
 }
 
 // Channel opens a new AMQP channel on the current connection. It returns
-// ErrNotConnected while a redial is in flight and ErrClosed once the Conn has
-// been closed — never a nil channel with a nil error.
+// ErrRabbitMQNotConnected while a redial is in flight and ErrRabbitMQClosed once
+// it has been closed — never a nil channel with a nil error.
 //
 // Channels are not safe for concurrent use, so each consumer and each publish
 // takes its own.
-func (c *Conn) Channel() (*amqp.Channel, error) {
+func (c *RabbitMQ) Channel() (*amqp.Channel, error) {
 
 	c.mu.RLock()
 	conn := c.conn
@@ -409,11 +410,11 @@ func (c *Conn) Channel() (*amqp.Channel, error) {
 	c.mu.RUnlock()
 
 	if closed {
-		return nil, ErrClosed
+		return nil, ErrRabbitMQClosed
 	}
 
 	if conn == nil {
-		return nil, ErrNotConnected
+		return nil, ErrRabbitMQNotConnected
 	}
 
 	channel, err := conn.Channel()
@@ -423,21 +424,21 @@ func (c *Conn) Channel() (*amqp.Channel, error) {
 
 			c.dropIfDead()
 
-			return nil, ErrNotConnected
+			return nil, ErrRabbitMQNotConnected
 		}
 
 		return nil, fmt.Errorf("rabbitmq: open channel: %w", err)
 	}
 
 	if channel == nil {
-		return nil, ErrNotConnected
+		return nil, ErrRabbitMQNotConnected
 	}
 
 	return channel, nil
 }
 
 // IsConnected reports whether a live connection to the broker is held.
-func (c *Conn) IsConnected() bool {
+func (c *RabbitMQ) IsConnected() bool {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -446,7 +447,7 @@ func (c *Conn) IsConnected() bool {
 }
 
 // isClosed reports whether Close has been called.
-func (c *Conn) isClosed() bool {
+func (c *RabbitMQ) isClosed() bool {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -456,7 +457,7 @@ func (c *Conn) isClosed() bool {
 
 // Ready returns a channel that is closed while the connection is live and open
 // while a redial is in flight.
-func (c *Conn) Ready() <-chan struct{} {
+func (c *RabbitMQ) Ready() <-chan struct{} {
 
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -464,24 +465,24 @@ func (c *Conn) Ready() <-chan struct{} {
 	return c.ready
 }
 
-// WaitReady blocks until the connection is live or the Conn is closed.
-func (c *Conn) WaitReady() error {
+// WaitReady blocks until the connection is live or the connection is closed.
+func (c *RabbitMQ) WaitReady() error {
 
 	return c.WaitReadyWithContext(context.Background())
 }
 
 // WaitReadyWithContext is WaitReady that also gives up when ctx is cancelled.
-func (c *Conn) WaitReadyWithContext(ctx context.Context) error {
+func (c *RabbitMQ) WaitReadyWithContext(ctx context.Context) error {
 
 	if c.isClosed() {
-		return ErrClosed
+		return ErrRabbitMQClosed
 	}
 
 	select {
 	case <-c.Ready():
 
 		if c.isClosed() {
-			return ErrClosed
+			return ErrRabbitMQClosed
 		}
 
 		return nil
@@ -490,13 +491,13 @@ func (c *Conn) WaitReadyWithContext(ctx context.Context) error {
 		return ctx.Err()
 
 	case <-c.ctx.Done():
-		return ErrClosed
+		return ErrRabbitMQClosed
 	}
 }
 
 // Close stops the supervisor and closes the underlying connection. It is safe
 // to call more than once.
-func (c *Conn) Close() error {
+func (c *RabbitMQ) Close() error {
 
 	c.mu.Lock()
 
@@ -532,7 +533,7 @@ func (c *Conn) Close() error {
 }
 
 // name applies the configured prefix to a queue, exchange or routing key.
-func (c *Conn) name(queue string) string {
+func (c *RabbitMQ) name(queue string) string {
 
 	return prefixed(c.cfg.QueuePrefix, queue)
 }
@@ -540,14 +541,14 @@ func (c *Conn) name(queue string) string {
 // QueueName returns the fully prefixed name of one of this service's own
 // queues, which is what Consume binds. Use it when publishing back to a queue
 // this service consumes, since Publish does not prefix on its own.
-func (c *Conn) QueueName(queue string) string {
+func (c *RabbitMQ) QueueName(queue string) string {
 
 	return c.name(queue)
 }
 
-// closeReason describes why a connection or channel closed, tolerating the nil
+// rabbitMQCloseReason describes why a connection or channel closed, tolerating the nil
 // error amqp delivers on a clean shutdown.
-func closeReason(reason *amqp.Error) string {
+func rabbitMQCloseReason(reason *amqp.Error) string {
 
 	if reason == nil {
 		return "rabbitmq: connection closed"

@@ -1,4 +1,4 @@
-package rabbitmq
+package connection
 
 import (
 	"context"
@@ -10,22 +10,22 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func TestDialRejectsMissingSettings(t *testing.T) {
+func TestRabbitMQDialRejectsMissingSettings(t *testing.T) {
 
 	cases := []struct {
 		name string
-		cfg  Config
+		cfg  RabbitMQConfig
 	}{
-		{"no host", Config{Port: "5672", Username: "guest"}},
-		{"no port", Config{Host: "localhost", Username: "guest"}},
-		{"no username", Config{Host: "localhost", Port: "5672"}},
+		{"no host", RabbitMQConfig{Port: "5672", Username: "guest"}},
+		{"no port", RabbitMQConfig{Host: "localhost", Username: "guest"}},
+		{"no username", RabbitMQConfig{Host: "localhost", Port: "5672"}},
 	}
 
 	for _, tc := range cases {
 
 		t.Run(tc.name, func(t *testing.T) {
 
-			conn, err := DialWithContext(context.Background(), tc.cfg)
+			conn, err := DialRabbitMQWithContext(context.Background(), tc.cfg)
 
 			if err == nil {
 				t.Fatal("Dial() succeeded, want an error")
@@ -38,13 +38,13 @@ func TestDialRejectsMissingSettings(t *testing.T) {
 	}
 }
 
-// TestDialErrorHidesPassword guards the defect this package exists to fix: the
+// TestRabbitMQDialErrorHidesPassword guards the defect this package exists to fix: the
 // services it replaces log the AMQP URI, password included, on every failure.
-func TestDialErrorHidesPassword(t *testing.T) {
+func TestRabbitMQDialErrorHidesPassword(t *testing.T) {
 
 	const password = "sup3rs3cr3t"
 
-	_, err := DialWithContext(context.Background(), Config{
+	_, err := DialRabbitMQWithContext(context.Background(), RabbitMQConfig{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "guest",
@@ -61,11 +61,11 @@ func TestDialErrorHidesPassword(t *testing.T) {
 	}
 }
 
-// TestDialReturnsErrorNotNilConnection is the core contract: services used to
+// TestRabbitMQDialReturnsErrorNotNilConnection is the core contract: services used to
 // get a typed nil back from their connection factory and dereference it.
-func TestDialReturnsErrorNotNilConnection(t *testing.T) {
+func TestRabbitMQDialReturnsErrorNotNilConnection(t *testing.T) {
 
-	conn, err := DialWithContext(context.Background(), Config{
+	conn, err := DialRabbitMQWithContext(context.Background(), RabbitMQConfig{
 		Host:        "127.0.0.1",
 		Port:        "1",
 		Username:    "guest",
@@ -81,9 +81,9 @@ func TestDialReturnsErrorNotNilConnection(t *testing.T) {
 	}
 }
 
-func TestURIEscapesCredentials(t *testing.T) {
+func TestRabbitMQURIEscapesCredentials(t *testing.T) {
 
-	cfg := Config{
+	cfg := RabbitMQConfig{
 		Host:     "rabbit",
 		Port:     "5672",
 		Username: "user@name",
@@ -102,16 +102,16 @@ func TestURIEscapesCredentials(t *testing.T) {
 	}
 }
 
-func TestURIOverrideWins(t *testing.T) {
+func TestRabbitMQURIOverrideWins(t *testing.T) {
 
-	cfg := Config{URI: "amqp://somewhere:5672/", Host: "ignored"}
+	cfg := RabbitMQConfig{URI: "amqp://somewhere:5672/", Host: "ignored"}
 
 	if got := cfg.uri(); got != "amqp://somewhere:5672/" {
 		t.Fatalf("uri() = %s, want the explicit URI", got)
 	}
 }
 
-func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
+func TestRabbitMQConfigFromEnvReadsPlatformNames(t *testing.T) {
 
 	t.Setenv("RABBITMQ_HOST", "rabbit")
 	t.Setenv("RABBITMQ_PORT", "5672")
@@ -120,7 +120,7 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	t.Setenv("RABBITMQ_VHOST", "chop")
 	t.Setenv("QUEUE_PREFIX", "bw")
 
-	cfg := ConfigFromEnv()
+	cfg := RabbitMQConfigFromEnv()
 
 	if cfg.Host != "rabbit" || cfg.Port != "5672" || cfg.Username != "guest" {
 		t.Fatalf("ConfigFromEnv() = %+v", cfg)
@@ -131,15 +131,15 @@ func TestConfigFromEnvReadsPlatformNames(t *testing.T) {
 	}
 }
 
-// TestClosedConnNeverReturnsNilChannelWithNilError covers the shape that caused
+// TestRabbitMQClosedConnNeverReturnsNilChannelWithNilError covers the shape that caused
 // the identity-service panic: a caller taking a channel off a dead connection.
-func TestClosedConnNeverReturnsNilChannelWithNilError(t *testing.T) {
+func TestRabbitMQClosedConnNeverReturnsNilChannelWithNilError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -152,7 +152,7 @@ func TestClosedConnNeverReturnsNilChannelWithNilError(t *testing.T) {
 		t.Fatal("Channel() succeeded on a closed Conn")
 	}
 
-	if !errors.Is(err, ErrClosed) {
+	if !errors.Is(err, ErrRabbitMQClosed) {
 		t.Fatalf("Channel() error = %v, want ErrClosed", err)
 	}
 
@@ -161,13 +161,13 @@ func TestClosedConnNeverReturnsNilChannelWithNilError(t *testing.T) {
 	}
 }
 
-func TestDisconnectedConnReportsNotConnected(t *testing.T) {
+func TestRabbitMQDisconnectedConnReportsNotConnected(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -175,7 +175,7 @@ func TestDisconnectedConnReportsNotConnected(t *testing.T) {
 
 	channel, err := c.Channel()
 
-	if !errors.Is(err, ErrNotConnected) {
+	if !errors.Is(err, ErrRabbitMQNotConnected) {
 		t.Fatalf("Channel() error = %v, want ErrNotConnected", err)
 	}
 
@@ -188,13 +188,13 @@ func TestDisconnectedConnReportsNotConnected(t *testing.T) {
 	}
 }
 
-func TestCloseIsIdempotent(t *testing.T) {
+func TestRabbitMQCloseIsIdempotent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -213,13 +213,13 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestWaitReadyUnblocksOnClose(t *testing.T) {
+func TestRabbitMQWaitReadyUnblocksOnClose(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -237,7 +237,7 @@ func TestWaitReadyUnblocksOnClose(t *testing.T) {
 	select {
 	case err := <-done:
 
-		if !errors.Is(err, ErrClosed) {
+		if !errors.Is(err, ErrRabbitMQClosed) {
 			t.Fatalf("WaitReady() = %v, want ErrClosed", err)
 		}
 
@@ -246,13 +246,13 @@ func TestWaitReadyUnblocksOnClose(t *testing.T) {
 	}
 }
 
-func TestWaitReadyHonoursContext(t *testing.T) {
+func TestRabbitMQWaitReadyHonoursContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -266,13 +266,13 @@ func TestWaitReadyHonoursContext(t *testing.T) {
 	}
 }
 
-func TestMarkDisconnectedThenAdoptResetsReady(t *testing.T) {
+func TestRabbitMQMarkDisconnectedThenAdoptResetsReady(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -289,7 +289,7 @@ func TestMarkDisconnectedThenAdoptResetsReady(t *testing.T) {
 	}
 }
 
-func TestPrefixed(t *testing.T) {
+func TestRabbitMQPrefixed(t *testing.T) {
 
 	cases := []struct {
 		prefix string
@@ -309,52 +309,52 @@ func TestPrefixed(t *testing.T) {
 	}
 }
 
-func TestCloseReasonToleratesNil(t *testing.T) {
+func TestRabbitMQCloseReasonToleratesNil(t *testing.T) {
 
-	if got := closeReason(nil); got == "" {
+	if got := rabbitMQCloseReason(nil); got == "" {
 		t.Fatal("closeReason(nil) returned an empty string")
 	}
 }
 
-func TestConsumeRejectsBadArguments(t *testing.T) {
+func TestRabbitMQConsumeRejectsBadArguments(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	c := &RabbitMQ{cfg: RabbitMQConfig{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
-	if err := c.ConsumeWithContext(context.Background(), ConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
+	if err := c.ConsumeWithContext(context.Background(), RabbitMQConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
 		t.Fatal("Consume() with no queue name succeeded")
 	}
 
-	if err := c.ConsumeWithContext(context.Background(), ConsumerConfig{Queue: "q"}, nil); err == nil {
+	if err := c.ConsumeWithContext(context.Background(), RabbitMQConsumerConfig{Queue: "q"}, nil); err == nil {
 		t.Fatal("Consume() with a nil handler succeeded")
 	}
 }
 
-func TestPublishRejectsEmptyQueueName(t *testing.T) {
+func TestRabbitMQPublishRejectsEmptyQueueName(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	c := &RabbitMQ{cfg: RabbitMQConfig{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
 	if err := c.PublishRawWithContext(context.Background(), "", []byte("{}"), 0); err == nil {
 		t.Fatal("PublishRaw() with an empty queue name succeeded")
 	}
 }
 
-// TestPublishDoesNotPrefixButConsumeDoes pins the asymmetry real services rely
+// TestRabbitMQPublishDoesNotPrefixButConsumeDoes pins the asymmetry real services rely
 // on: a service publishes to another service's queue by its exact name
 // ("reports-service.deposit.create"), while Consume binds only queues this
 // service owns and namespaces them with QUEUE_PREFIX.
-func TestPublishDoesNotPrefixButConsumeDoes(t *testing.T) {
+func TestRabbitMQPublishDoesNotPrefixButConsumeDoes(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{
-		cfg:    Config{QueuePrefix: "affiliate-service-local"},
+	c := &RabbitMQ{
+		cfg:    RabbitMQConfig{QueuePrefix: "affiliate-service-local"},
 		ready:  make(chan struct{}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -371,18 +371,18 @@ func TestPublishDoesNotPrefixButConsumeDoes(t *testing.T) {
 	}
 }
 
-func TestPublishBatchRejectsBadArguments(t *testing.T) {
+func TestRabbitMQPublishBatchRejectsBadArguments(t *testing.T) {
 
-	var missing *Conn
+	var missing *RabbitMQ
 
-	if err := missing.PublishBatch("q", []any{1}, 0); !errors.Is(err, ErrNotConnected) {
+	if err := missing.PublishBatch("q", []any{1}, 0); !errors.Is(err, ErrRabbitMQNotConnected) {
 		t.Fatalf("PublishBatch() on a nil Conn = %v, want ErrNotConnected", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	c := &RabbitMQ{cfg: RabbitMQConfig{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
 	if err := c.PublishBatch("", []any{1}, 0); err == nil {
 		t.Fatal("PublishBatch() with an empty queue name succeeded")
@@ -393,43 +393,43 @@ func TestPublishBatchRejectsBadArguments(t *testing.T) {
 	}
 }
 
-// TestPublishBatchEncodesBeforeSending pins that a bad payload fails the whole
+// TestRabbitMQPublishBatchEncodesBeforeSending pins that a bad payload fails the whole
 // batch up front. This Conn has no connection, so reaching the broker would
 // fail with ErrNotConnected instead of the encode error.
-func TestPublishBatchEncodesBeforeSending(t *testing.T) {
+func TestRabbitMQPublishBatchEncodesBeforeSending(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	c := &RabbitMQ{cfg: RabbitMQConfig{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
 	err := c.PublishBatch("q", []any{map[string]int{"n": 1}, make(chan int)}, 0)
 
-	if err == nil || errors.Is(err, ErrNotConnected) {
+	if err == nil || errors.Is(err, ErrRabbitMQNotConnected) {
 		t.Fatalf("PublishBatch() = %v, want an encode error", err)
 	}
 }
 
-// TestPublishFormats pins the wire format of each publisher: the plain forms
+// TestRabbitMQPublishFormats pins the wire format of each publisher: the plain forms
 // must match what services sent before adopting this package.
-func TestPublishFormats(t *testing.T) {
+func TestRabbitMQPublishFormats(t *testing.T) {
 
 	legacy := legacyFormat.publishing([]byte("{}"), 3)
 
-	if legacy.ContentType != LegacyContentType || legacy.DeliveryMode != 0 || !legacy.Timestamp.IsZero() || legacy.Priority != 3 {
+	if legacy.ContentType != LegacyRabbitMQContentType || legacy.DeliveryMode != 0 || !legacy.Timestamp.IsZero() || legacy.Priority != 3 {
 		t.Fatalf("legacy publishing = %+v, want text/plain, no delivery mode, no timestamp, priority 3", legacy)
 	}
 
 	current := jsonFormat.publishing([]byte("{}"), 3)
 
-	if current.ContentType != DefaultContentType || current.DeliveryMode != amqp.Persistent || current.Timestamp.IsZero() || current.Priority != 3 {
+	if current.ContentType != DefaultRabbitMQContentType || current.DeliveryMode != amqp.Persistent || current.Timestamp.IsZero() || current.Priority != 3 {
 		t.Fatalf("json publishing = %+v, want application/json, persistent, timestamped, priority 3", current)
 	}
 }
 
-func TestPlainVariantsKeepTheContract(t *testing.T) {
+func TestRabbitMQPlainVariantsKeepTheContract(t *testing.T) {
 
-	conn, err := Dial(Config{})
+	conn, err := DialRabbitMQ(RabbitMQConfig{})
 	if err == nil {
 		t.Fatal("Dial() with no settings succeeded")
 	}
@@ -441,9 +441,9 @@ func TestPlainVariantsKeepTheContract(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := &Conn{cfg: Config{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
+	c := &RabbitMQ{cfg: RabbitMQConfig{}, ready: make(chan struct{}), ctx: ctx, cancel: cancel}
 
-	if err := c.Consume(ConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
+	if err := c.Consume(RabbitMQConsumerConfig{}, func(context.Context, amqp.Delivery) error { return nil }); err == nil {
 		t.Fatal("Consume() with no queue name succeeded")
 	}
 
@@ -453,7 +453,7 @@ func TestPlainVariantsKeepTheContract(t *testing.T) {
 
 	c.Close()
 
-	if err := c.WaitReady(); !errors.Is(err, ErrClosed) {
+	if err := c.WaitReady(); !errors.Is(err, ErrRabbitMQClosed) {
 		t.Fatalf("WaitReady() after Close = %v, want ErrClosed", err)
 	}
 }

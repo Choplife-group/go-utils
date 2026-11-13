@@ -1,4 +1,4 @@
-// Package redis opens Redis clients for the platform's two roles.
+// OpenRedis opens Redis clients for the platform's two roles.
 //
 // Services use two Redis instances: a service-local cache and the shared global
 // instance that identity-service writes tokens into and every auth middleware
@@ -12,14 +12,15 @@
 //	REDIS_MIN_IDLE_CONNECTIONS    (optional) idle pool floor, default 10
 //
 // The shared platform cache reads the same names behind a GLOBAL_ prefix —
-// spelled out in full by GlobalConfigFromEnv — and is opened with
-// OpenGlobalFromEnv.
+// spelled out in full by GlobalRedisConfigFromEnv — and is opened with
+// OpenGlobalRedisFromEnv.
 //
 // Each client is opened once and cached: calling a constructor twice hands back
 // the same client rather than building a second connection pool. Callers must
 // therefore NOT call Close on a client obtained here — a health check that
 // closed its client would take the whole service's cache down with it.
-package redis
+
+package connection
 
 import (
 	"context"
@@ -38,22 +39,22 @@ import (
 // collapsed into one — auth reads the global instance and must not be handed
 // the service-local one.
 const (
-	localRole  = "local"
-	globalRole = "global"
+	redisLocalRole  = "local"
+	redisGlobalRole = "global"
 )
 
 // Default client settings.
 const (
-	DefaultDB              = 1
-	DefaultMinIdleConns    = 10
-	DefaultConnMaxIdleTime = 60 * time.Second
-	DefaultDialTimeout     = 5 * time.Second
-	DefaultPingTimeout     = 5 * time.Second
+	DefaultRedisDB              = 1
+	DefaultRedisMinIdleConns    = 10
+	DefaultRedisConnMaxIdleTime = 60 * time.Second
+	DefaultRedisDialTimeout     = 5 * time.Second
+	DefaultRedisPingTimeout     = 5 * time.Second
 )
 
-// Config describes a Redis client. The zero value is not usable — Host and Port
-// are required — but every other field has a default applied by Open.
-type Config struct {
+// RedisConfig describes a Redis client. The zero value is not usable — Host and Port
+// are required — but every other field has a default applied by OpenRedis.
+type RedisConfig struct {
 	Host     string
 	Port     string
 	Password string
@@ -64,7 +65,7 @@ type Config struct {
 	ConnMaxIdleTime time.Duration
 	DialTimeout     time.Duration
 
-	// PingTimeout bounds the connectivity check Open performs.
+	// PingTimeout bounds the connectivity check OpenRedis performs.
 	PingTimeout time.Duration
 
 	// Tracing instruments the client with OpenTelemetry when set.
@@ -74,17 +75,17 @@ type Config struct {
 // applyDefaults fills in fields left at their zero value.
 //
 // PoolSize deliberately falls through to go-redis's own default of ten
-// connections per CPU. The services this package replaces all hardcoded a pool
+// connections per CPU. The services this code replaces all hardcoded a pool
 // of 1000, which was copied between repos rather than measured and reserves far
 // more sockets than any of them use.
-func (c *Config) applyDefaults() {
+func (c *RedisConfig) applyDefaults() {
 
 	if c.PoolSize <= 0 {
 		c.PoolSize = 10 * runtime.GOMAXPROCS(0)
 	}
 
 	if c.MinIdleConns <= 0 {
-		c.MinIdleConns = DefaultMinIdleConns
+		c.MinIdleConns = DefaultRedisMinIdleConns
 	}
 
 	if c.MinIdleConns > c.PoolSize {
@@ -92,20 +93,20 @@ func (c *Config) applyDefaults() {
 	}
 
 	if c.ConnMaxIdleTime <= 0 {
-		c.ConnMaxIdleTime = DefaultConnMaxIdleTime
+		c.ConnMaxIdleTime = DefaultRedisConnMaxIdleTime
 	}
 
 	if c.DialTimeout <= 0 {
-		c.DialTimeout = DefaultDialTimeout
+		c.DialTimeout = DefaultRedisDialTimeout
 	}
 
 	if c.PingTimeout <= 0 {
-		c.PingTimeout = DefaultPingTimeout
+		c.PingTimeout = DefaultRedisPingTimeout
 	}
 }
 
 // validate reports the first required field that is missing.
-func (c *Config) validate() error {
+func (c *RedisConfig) validate() error {
 
 	switch {
 	case c.Host == "":
@@ -118,113 +119,114 @@ func (c *Config) validate() error {
 }
 
 // addr returns the host:port the client dials.
-func (c *Config) addr() string {
+func (c *RedisConfig) addr() string {
 
 	return fmt.Sprintf("%s:%s", c.Host, c.Port)
 }
 
-// ConfigFromEnv reads the service-local cache settings from the REDIS_*
+// RedisConfigFromEnv reads the service-local cache settings from the REDIS_*
 // variables.
-func ConfigFromEnv() Config {
+func RedisConfigFromEnv() RedisConfig {
 
-	return Config{
+	return RedisConfig{
 		Host:         env.String("REDIS_HOST", ""),
 		Port:         env.String("REDIS_PORT", ""),
 		Password:     env.String("REDIS_PASSWORD", ""),
-		DB:           env.Int("REDIS_DATABASE_NUMBER", DefaultDB),
+		DB:           env.Int("REDIS_DATABASE_NUMBER", DefaultRedisDB),
 		PoolSize:     env.Int("REDIS_POOL_SIZE", 0),
-		MinIdleConns: env.Int("REDIS_MIN_IDLE_CONNECTIONS", DefaultMinIdleConns),
+		MinIdleConns: env.Int("REDIS_MIN_IDLE_CONNECTIONS", DefaultRedisMinIdleConns),
 		Tracing:      env.Bool("REDIS_TRACING", false),
 	}
 }
 
-// GlobalConfigFromEnv reads the shared platform cache settings from the
-// GLOBAL_REDIS_* variables. It mirrors ConfigFromEnv field for field, and
-// TestConfigConstructorsStayInSync fails if the two ever drift apart.
-func GlobalConfigFromEnv() Config {
+// GlobalRedisConfigFromEnv reads the shared platform cache settings from the
+// GLOBAL_REDIS_* variables. It mirrors RedisConfigFromEnv field for field, and
+// TestRedisConfigConstructorsStayInSync fails if the two ever drift apart.
+func GlobalRedisConfigFromEnv() RedisConfig {
 
-	return Config{
+	return RedisConfig{
 		Host:         env.String("GLOBAL_REDIS_HOST", ""),
 		Port:         env.String("GLOBAL_REDIS_PORT", ""),
 		Password:     env.String("GLOBAL_REDIS_PASSWORD", ""),
-		DB:           env.Int("GLOBAL_REDIS_DATABASE_NUMBER", DefaultDB),
+		DB:           env.Int("GLOBAL_REDIS_DATABASE_NUMBER", DefaultRedisDB),
 		PoolSize:     env.Int("GLOBAL_REDIS_POOL_SIZE", 0),
-		MinIdleConns: env.Int("GLOBAL_REDIS_MIN_IDLE_CONNECTIONS", DefaultMinIdleConns),
+		MinIdleConns: env.Int("GLOBAL_REDIS_MIN_IDLE_CONNECTIONS", DefaultRedisMinIdleConns),
 		Tracing:      env.Bool("GLOBAL_REDIS_TRACING", false),
 	}
 }
 
 var (
-	mu      sync.Mutex
-	clients = map[string]*redis.Client{}
+	redisMu      sync.Mutex
+	redisClients = map[string]*redis.Client{}
 )
 
-// OpenFromEnv returns the service-local cache client, read from the REDIS_*
+// OpenRedisFromEnv returns the service-local cache client, read from the REDIS_*
 // variables and opened on first use. Repeated calls return the same client, so
 // do not Close it.
-func OpenFromEnv() (*redis.Client, error) {
+func OpenRedisFromEnv() (*redis.Client, error) {
 
-	return openCached(context.Background(), localRole, ConfigFromEnv())
+	return openCachedRedis(context.Background(), redisLocalRole, RedisConfigFromEnv())
 }
 
-// OpenFromEnvWithContext is OpenFromEnv with the first-use ping bound to ctx.
-func OpenFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
+// OpenRedisFromEnvWithContext is OpenRedisFromEnv with the first-use ping
+// bound to ctx.
+func OpenRedisFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
 
-	return openCached(ctx, localRole, ConfigFromEnv())
+	return openCachedRedis(ctx, redisLocalRole, RedisConfigFromEnv())
 }
 
-// OpenGlobalFromEnv returns the shared platform cache client, read from the
+// OpenGlobalRedisFromEnv returns the shared platform cache client, read from the
 // GLOBAL_REDIS_* variables. This is the instance identity-service writes tokens
 // into and the one auth middleware must be given — never the local cache.
 // Repeated calls return the same client, so do not Close it.
-func OpenGlobalFromEnv() (*redis.Client, error) {
+func OpenGlobalRedisFromEnv() (*redis.Client, error) {
 
-	return openCached(context.Background(), globalRole, GlobalConfigFromEnv())
+	return openCachedRedis(context.Background(), redisGlobalRole, GlobalRedisConfigFromEnv())
 }
 
-// OpenGlobalFromEnvWithContext is OpenGlobalFromEnv with the first-use ping
+// OpenGlobalRedisFromEnvWithContext is OpenGlobalRedisFromEnv with the first-use ping
 // bound to ctx.
-func OpenGlobalFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
+func OpenGlobalRedisFromEnvWithContext(ctx context.Context) (*redis.Client, error) {
 
-	return openCached(ctx, globalRole, GlobalConfigFromEnv())
+	return openCachedRedis(ctx, redisGlobalRole, GlobalRedisConfigFromEnv())
 }
 
-// openCached returns the client cached under key, opening it on first use.
+// openCachedRedis returns the client cached under key, opening it on first use.
 // Only successful opens are cached, so a transient failure at startup does not
 // poison every later call.
-func openCached(ctx context.Context, key string, cfg Config) (*redis.Client, error) {
+func openCachedRedis(ctx context.Context, key string, cfg RedisConfig) (*redis.Client, error) {
 
-	mu.Lock()
-	defer mu.Unlock()
+	redisMu.Lock()
+	defer redisMu.Unlock()
 
-	if client, ok := clients[key]; ok {
+	if client, ok := redisClients[key]; ok {
 		return client, nil
 	}
 
-	client, err := OpenWithContext(ctx, cfg)
+	client, err := OpenRedisWithContext(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	clients[key] = client
+	redisClients[key] = client
 
 	return client, nil
 }
 
-// Open validates cfg, builds a client and verifies it with a ping. It never
+// OpenRedis validates cfg, builds a client and verifies it with a ping. It never
 // returns a non-nil client alongside an error, and never returns a nil client
 // with a nil error.
 //
-// Unlike OpenFromEnv, the client returned here is not cached and is the
+// Unlike OpenRedisFromEnv, the client returned here is not cached and is the
 // caller's to Close.
-func Open(cfg Config) (*redis.Client, error) {
+func OpenRedis(cfg RedisConfig) (*redis.Client, error) {
 
-	return OpenWithContext(context.Background(), cfg)
+	return OpenRedisWithContext(context.Background(), cfg)
 }
 
-// OpenWithContext is Open with the startup ping bound to ctx as well as
+// OpenRedisWithContext is OpenRedis with the startup ping bound to ctx as well as
 // PingTimeout.
-func OpenWithContext(ctx context.Context, cfg Config) (*redis.Client, error) {
+func OpenRedisWithContext(ctx context.Context, cfg RedisConfig) (*redis.Client, error) {
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -265,16 +267,16 @@ func OpenWithContext(ctx context.Context, cfg Config) (*redis.Client, error) {
 	return client, nil
 }
 
-// Ping checks that a client is still reachable, and is what a health-check
+// PingRedis checks that a client is still reachable, and is what a health-check
 // handler should call. A nil client is reported as an error rather than
 // panicking.
-func Ping(client *redis.Client) error {
+func PingRedis(client *redis.Client) error {
 
-	return PingWithContext(context.Background(), client)
+	return PingRedisWithContext(context.Background(), client)
 }
 
-// PingWithContext is Ping bounded by ctx.
-func PingWithContext(ctx context.Context, client *redis.Client) error {
+// PingRedisWithContext is PingRedis bounded by ctx.
+func PingRedisWithContext(ctx context.Context, client *redis.Client) error {
 
 	if client == nil {
 		return fmt.Errorf("redis: not initialised")

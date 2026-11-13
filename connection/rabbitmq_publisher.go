@@ -1,4 +1,4 @@
-package rabbitmq
+package connection
 
 import (
 	"context"
@@ -12,11 +12,11 @@ import (
 )
 
 // Content types stamped on published messages. The WithContext publishers send
-// DefaultContentType; the plain ones send LegacyContentType, which is what
+// DefaultRabbitMQContentType; the plain ones send LegacyRabbitMQContentType, which is what
 // services' own publishers sent before this package existed.
 const (
-	DefaultContentType = "application/json"
-	LegacyContentType  = "text/plain"
+	DefaultRabbitMQContentType = "application/json"
+	LegacyRabbitMQContentType  = "text/plain"
 )
 
 // exchangeType is the exchange kind every queue on the platform uses.
@@ -32,10 +32,10 @@ type format struct {
 var (
 	// legacyFormat reproduces the services' original publishers exactly:
 	// text/plain, no delivery mode (transient) and no timestamp.
-	legacyFormat = format{contentType: LegacyContentType}
+	legacyFormat = format{contentType: LegacyRabbitMQContentType}
 
 	// jsonFormat labels the body as JSON and persists it across a broker restart.
-	jsonFormat = format{contentType: DefaultContentType, deliveryMode: amqp.Persistent, timestamp: true}
+	jsonFormat = format{contentType: DefaultRabbitMQContentType, deliveryMode: amqp.Persistent, timestamp: true}
 )
 
 // publishing builds the AMQP message for body.
@@ -81,27 +81,27 @@ func prefixed(prefix, queue string) string {
 // If the connection dropped just before the call, Publish waits for the
 // supervisor to restore it and tries once more, so a broker restart costs a
 // short delay rather than a lost message.
-func (c *Conn) Publish(name string, payload any, priority uint8) error {
+func (c *RabbitMQ) Publish(name string, payload any, priority uint8) error {
 
 	return c.publishPayloads(context.Background(), name, []any{payload}, priority, legacyFormat)
 }
 
 // PublishWithContext is Publish bounded by ctx, sending the message as
 // application/json and persistent.
-func (c *Conn) PublishWithContext(ctx context.Context, name string, payload any, priority uint8) error {
+func (c *RabbitMQ) PublishWithContext(ctx context.Context, name string, payload any, priority uint8) error {
 
 	return c.publishPayloads(ctx, name, []any{payload}, priority, jsonFormat)
 }
 
 // PublishRaw publishes an already-encoded body in the same format as Publish.
-func (c *Conn) PublishRaw(name string, body []byte, priority uint8) error {
+func (c *RabbitMQ) PublishRaw(name string, body []byte, priority uint8) error {
 
 	return c.publish(context.Background(), name, [][]byte{body}, priority, legacyFormat)
 }
 
 // PublishRawWithContext publishes an already-encoded body in the same format as
 // PublishWithContext.
-func (c *Conn) PublishRawWithContext(ctx context.Context, name string, body []byte, priority uint8) error {
+func (c *RabbitMQ) PublishRawWithContext(ctx context.Context, name string, body []byte, priority uint8) error {
 
 	return c.publish(ctx, name, [][]byte{body}, priority, jsonFormat)
 }
@@ -113,20 +113,20 @@ func (c *Conn) PublishRawWithContext(ctx context.Context, name string, body []by
 // encoded fails the batch without publishing part of it. If the connection drops
 // part-way, PublishBatch waits for the redial and resumes from the message that
 // failed rather than resending the ones before it.
-func (c *Conn) PublishBatch(name string, payloads []any, priority uint8) error {
+func (c *RabbitMQ) PublishBatch(name string, payloads []any, priority uint8) error {
 
 	return c.publishPayloads(context.Background(), name, payloads, priority, legacyFormat)
 }
 
 // PublishBatchWithContext is PublishBatch bounded by ctx, sending each message
 // as application/json and persistent.
-func (c *Conn) PublishBatchWithContext(ctx context.Context, name string, payloads []any, priority uint8) error {
+func (c *RabbitMQ) PublishBatchWithContext(ctx context.Context, name string, payloads []any, priority uint8) error {
 
 	return c.publishPayloads(ctx, name, payloads, priority, jsonFormat)
 }
 
 // publishPayloads encodes every payload as JSON and publishes the lot.
-func (c *Conn) publishPayloads(ctx context.Context, name string, payloads []any, priority uint8, f format) error {
+func (c *RabbitMQ) publishPayloads(ctx context.Context, name string, payloads []any, priority uint8, f format) error {
 
 	bodies := make([][]byte, len(payloads))
 
@@ -145,10 +145,10 @@ func (c *Conn) publishPayloads(ctx context.Context, name string, payloads []any,
 
 // publish sends bodies in order, retrying once from the first unsent message if
 // the connection was lost.
-func (c *Conn) publish(ctx context.Context, name string, bodies [][]byte, priority uint8, f format) error {
+func (c *RabbitMQ) publish(ctx context.Context, name string, bodies [][]byte, priority uint8, f format) error {
 
 	if c == nil {
-		return ErrNotConnected
+		return ErrRabbitMQNotConnected
 	}
 
 	if name == "" {
@@ -194,7 +194,7 @@ func (c *Conn) publish(ctx context.Context, name string, bodies [][]byte, priori
 
 // publishOnce sends bodies on one channel and reports how many were handed to
 // the broker before any failure.
-func (c *Conn) publishOnce(ctx context.Context, name string, bodies [][]byte, priority uint8, f format) (int, error) {
+func (c *RabbitMQ) publishOnce(ctx context.Context, name string, bodies [][]byte, priority uint8, f format) (int, error) {
 
 	channel, err := c.Channel()
 	if err != nil {
@@ -211,7 +211,7 @@ func (c *Conn) publishOnce(ctx context.Context, name string, bodies [][]byte, pr
 
 	for i, body := range bodies {
 
-		publishCtx, cancel := context.WithTimeout(ctx, DefaultPublishTimeout)
+		publishCtx, cancel := context.WithTimeout(ctx, DefaultRabbitMQPublishTimeout)
 		err := channel.PublishWithContext(publishCtx, target, target, false, false, f.publishing(body, priority))
 		cancel()
 
@@ -230,11 +230,11 @@ func isRetryable(err error) bool {
 		return false
 	}
 
-	if errors.Is(err, ErrNotConnected) || errors.Is(err, amqp.ErrClosed) {
+	if errors.Is(err, ErrRabbitMQNotConnected) || errors.Is(err, amqp.ErrClosed) {
 		return true
 	}
 
-	if errors.Is(err, ErrClosed) {
+	if errors.Is(err, ErrRabbitMQClosed) {
 		return false
 	}
 
